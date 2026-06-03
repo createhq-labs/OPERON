@@ -4,9 +4,14 @@ import type { DriveDocumentPermission } from "@/core/operon";
 
 const GOOGLE_DRIVE_CLIENT_ID = process.env.GOOGLE_DRIVE_CLIENT_ID ?? "";
 const GOOGLE_DRIVE_CLIENT_SECRET = process.env.GOOGLE_DRIVE_CLIENT_SECRET ?? "";
-const APP_BASE_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-const REDIRECT_URI = process.env.GOOGLE_DRIVE_REDIRECT_URI ?? `${APP_BASE_URL}/api/drive?action=callback`;
-const WEBHOOK_CALLBACK_URL = process.env.GOOGLE_DRIVE_WEBHOOK_CALLBACK_URL ?? `${APP_BASE_URL}/api/drive?action=webhook`;
+const APP_BASE_URL = process.env.NEXT_PUBLIC_APP_URL ?? "";
+const REDIRECT_URI =
+  process.env.GOOGLE_DRIVE_REDIRECT_URI ??
+  process.env.NEXT_PUBLIC_GOOGLE_OAUTH_REDIRECT_URI ??
+  (APP_BASE_URL ? `${APP_BASE_URL}/api/drive?action=callback` : "");
+const WEBHOOK_CALLBACK_URL =
+  process.env.GOOGLE_DRIVE_WEBHOOK_CALLBACK_URL ??
+  (APP_BASE_URL ? `${APP_BASE_URL}/api/drive?action=webhook` : "");
 const OAUTH_SCOPES = [
   "openid",
   "email",
@@ -119,7 +124,7 @@ export function buildGoogleDriveAuthUrl(state: string) {
 }
 
 export function isGoogleDriveAuthConfigured() {
-  return Boolean(GOOGLE_DRIVE_CLIENT_ID && GOOGLE_DRIVE_CLIENT_SECRET);
+  return Boolean(GOOGLE_DRIVE_CLIENT_ID && GOOGLE_DRIVE_CLIENT_SECRET && REDIRECT_URI);
 }
 
 export async function exchangeGoogleOAuthCode(code: string): Promise<GoogleOAuthTokens> {
