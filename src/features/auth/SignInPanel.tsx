@@ -4,20 +4,14 @@ import type { Role, RoleId } from "@/core/operon";
 
 interface SignInPanelProps {
   signIn: () => Promise<void>;
-  enableDevAuth: boolean;
-  signInOptions: Role[];
-  handleDevLogin: (roleId: RoleId) => void;
   googleAuthConfigured: boolean;
-  googleAuthUnavailableMessage?: string;
+  authError?: string;
 }
 
 export function SignInPanel({
   signIn,
-  enableDevAuth,
-  signInOptions,
-  handleDevLogin,
   googleAuthConfigured,
-  googleAuthUnavailableMessage,
+  authError,
 }: SignInPanelProps) {
   return (
     <section className="operon-panel p-6">
@@ -39,28 +33,12 @@ export function SignInPanel({
           >
             Sign in with Google
           </button>
-          {!googleAuthConfigured && googleAuthUnavailableMessage ? (
+          {!googleAuthConfigured ? (
             <div className="col-span-full rounded-3xl border border-border-subtle bg-bg-primary/95 p-4 text-sm text-content-secondary">
-              <div className="font-semibold text-content-primary">Google Sign-In is temporarily unavailable</div>
-              <p className="mt-2 text-sm leading-6">{googleAuthUnavailableMessage}</p>
-            </div>
-          ) : null}
-          {enableDevAuth ? (
-            <div className="col-span-full rounded-3xl border border-border bg-bg-secondary/95 p-4 text-sm text-content-secondary">
-              <div className="mb-3 text-base font-semibold text-content-primary">Developer fallback</div>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {signInOptions.map((role) => (
-                  <button
-                    key={role.id}
-                    type="button"
-                    onClick={() => handleDevLogin(role.id)}
-                    className="rounded-3xl border border-border bg-bg-secondary px-5 py-4 text-left text-sm font-semibold text-content-primary transition hover:border-primary hover:bg-bg-secondary/90"
-                  >
-                    {role.name}
-                  </button>
-                ))}
-              </div>
-              <p className="mt-3 text-xs uppercase tracking-[0.22em] text-content-tertiary">Use only when local development mode is enabled.</p>
+              <div className="font-semibold text-content-primary">Google Sign-In is unavailable</div>
+              <p className="mt-2 text-sm leading-6">
+                {authError ?? "Sign in is disabled until Supabase authentication is configured and available."}
+              </p>
             </div>
           ) : null}
         </div>

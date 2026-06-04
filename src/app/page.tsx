@@ -7,7 +7,7 @@ import { getProviderHealth, setDataProviderMode, subscribeToDataUpdates, onSupab
 import { connectDrive, attachDriveDocument, attachDriveFolder, getDriveDiagnostics, type DriveDiagnostics } from "@/services/drive";
 import { renderBlock } from "@/renderers";
 import { useSession } from "@/auth/useSession";
-import { ENABLE_GOOGLE_DRIVE, ENABLE_DRIVE_ATTACHMENTS, ENABLE_DEV_AUTH } from "@/config/featureFlags";
+import { ENABLE_GOOGLE_DRIVE, ENABLE_DRIVE_ATTACHMENTS } from "@/config/featureFlags";
 import { SectionNavigation } from "@/features/navigation/SectionNavigation";
 import { SignInPanel } from "@/features/auth/SignInPanel";
 import { HomePanel } from "@/features/dashboard/HomePanel";
@@ -96,7 +96,7 @@ type Section = keyof typeof SECTION_NAMES;
 type ResourceCategoryFilter = ResourceCategory | "all";
 
 export default function Page() {
-  const { user, loaded, signIn, signOut, signInWithRole } = useSession();
+  const { user, loaded, signIn, signOut } = useSession();
   const [selectedSection, setSelectedSection] = useState<Section>("signin");
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [librarySearch, setLibrarySearch] = useState("");
@@ -171,9 +171,9 @@ export default function Page() {
       process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() &&
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim()
   );
-  const googleAuthUnavailableMessage = googleAuthConfigured
-    ? undefined
-    : providerHealth.diagnostics?.message || "Google Sign-In is temporarily unavailable.";
+  const googleAuthError = !googleAuthConfigured
+    ? providerHealth.diagnostics?.message || "Sign in is disabled until Supabase authentication is configured and available."
+    : undefined;
   const router = useRouter();
 
   useEffect(() => {
@@ -241,7 +241,6 @@ export default function Page() {
     setRoles(getRoles());
   }, [user?.roleId]);
 
-  const signInOptions = getSignInRoleOptions();
   const quickActions = useMemo(() => (user ? getQuickActions(user) : []), [user]);
   const displayQuickActions = quickActions.length > 0 ? quickActions : cachedQuickActions;
 
@@ -318,11 +317,6 @@ export default function Page() {
     () => (user ? getAssignableDepartments(user, newRoleId) : []),
     [user, newRoleId]
   );
-
-  function handleDevLogin(roleId: RoleId) {
-    if (!ENABLE_DEV_AUTH) return;
-    signInWithRole(roleId);
-  }
 
   function resetAppState() {
     setSelectedSection("signin");
@@ -779,11 +773,8 @@ export default function Page() {
           {!user || selectedSection === "signin" ? (
             <SignInPanel
               signIn={signIn}
-              enableDevAuth={ENABLE_DEV_AUTH}
-              signInOptions={signInOptions}
-              handleDevLogin={handleDevLogin}
               googleAuthConfigured={googleAuthConfigured}
-              googleAuthUnavailableMessage={googleAuthUnavailableMessage}
+              authError={googleAuthError}
             />
           ) : selectedSection === "home" ? (
             <HomePanel

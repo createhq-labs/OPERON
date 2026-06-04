@@ -9,7 +9,7 @@ import { getSupabaseDiagnostics, resolveSupabaseAvailability } from "@/lib/supab
 import { logRuntimeError, logRuntimeEvent, logRuntimeWarning } from "@/services/observability/runtimeLogger";
 import { recordRuntimeMetric } from "@/services/observability/runtimeMetrics";
 
-type AuthStatus = "initializing" | "authenticated" | "unauthenticated" | "degraded_local" | "offline" | "failed";
+type AuthStatus = "initializing" | "authenticated" | "unauthenticated" | "failed";
 
 interface AuthState {
   user: User | null;
@@ -18,7 +18,7 @@ interface AuthState {
   error?: string;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
-  signInWithRole: (roleId: string) => void;
+  signInWithRole: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthState>({
@@ -28,10 +28,9 @@ const AuthContext = createContext<AuthState>({
   error: undefined,
   signIn: async () => {},
   signOut: async () => {},
-  signInWithRole: () => {},
+  signInWithRole: async () => {},
 });
 
-const DEV_AUTH_ENABLED = process.env.NEXT_PUBLIC_DEV_AUTH === "true";
 const AUTH_BOOTSTRAP_TIMEOUT_MS = 3000;
 
 export function AuthProvider({ children }: PropsWithChildren) {
@@ -68,9 +67,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
       const isAvailable = availability.available;
       const resolvedStatus: AuthStatus = currentUser
         ? "authenticated"
-        : !diagnostics.configured || !isAvailable
-        ? "degraded_local"
-        : "unauthenticated";
+        : diagnostics.configured
+        ? "unauthenticated"
+        : "failed";
 
       if (!mountedRef.current) {
         return;
@@ -160,16 +159,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
     }
   }
 
-  function signInWithRole(roleId: string) {
-    if (!DEV_AUTH_ENABLED) {
-      console.warn("Developer auth fallback is disabled. Use real sign in instead.");
-      return;
-    }
-    const devUser = getUserByRoleId(roleId);
-    if (mountedRef.current) {
-      setUser(devUser ?? null);
-      setStatus(devUser ? "authenticated" : "unauthenticated");
-    }
+  async function signInWithRole() {
+    await signIn();
   }
 
   return (
