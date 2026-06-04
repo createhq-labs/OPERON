@@ -164,7 +164,16 @@ export default function Page() {
   const [roleFormMessage, setRoleFormMessage] = useState("");
   const [showRoleEditor, setShowRoleEditor] = useState(false);
   const driveEnabled = ENABLE_GOOGLE_DRIVE || ENABLE_DRIVE_ATTACHMENTS;
-  const googleAuthConfigured = Boolean(providerHealth.diagnostics?.configured && providerHealth.diagnostics?.authMode !== "none");
+  const googleAuthConfigured = Boolean(
+    providerHealth.providerMode === "supabase" &&
+      providerHealth.diagnostics?.configured &&
+      providerHealth.diagnostics?.authMode !== "none" &&
+      process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() &&
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim()
+  );
+  const googleAuthUnavailableMessage = googleAuthConfigured
+    ? undefined
+    : providerHealth.diagnostics?.message || "Google Sign-In is temporarily unavailable.";
   const router = useRouter();
 
   useEffect(() => {
@@ -774,7 +783,7 @@ export default function Page() {
               signInOptions={signInOptions}
               handleDevLogin={handleDevLogin}
               googleAuthConfigured={googleAuthConfigured}
-              googleAuthUnavailableMessage="Google Sign-In will be available after deployment."
+              googleAuthUnavailableMessage={googleAuthUnavailableMessage}
             />
           ) : selectedSection === "home" ? (
             <HomePanel
