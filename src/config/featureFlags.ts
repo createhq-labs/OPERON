@@ -5,6 +5,9 @@ export const ENABLE_GOOGLE_SIGN_IN = Boolean(
   process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() &&
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim()
 );
+export const ENABLE_BOOTSTRAP_AUTH =
+  process.env.NEXT_PUBLIC_BOOTSTRAP_AUTH === "true" &&
+  process.env.NODE_ENV !== "production";
 export const ENABLE_DEV_AUTH = process.env.NEXT_PUBLIC_DEV_AUTH === "true";
 
 
