@@ -78,8 +78,14 @@ export class SupabaseAuthAdapter implements AuthAdapter {
       throw new Error("Authentication is not configured.");
     }
 
+    const redirectTo = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_REDIRECT_URI?.trim();
+    const options = redirectTo ? { redirectTo } : undefined;
+
     try {
-      await supabase.auth.signInWithOAuth({ provider: "google" });
+      await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options,
+      });
     } catch (error) {
       console.error("Supabase sign-in failed", error);
       throw error;

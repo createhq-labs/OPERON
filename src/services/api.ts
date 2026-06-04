@@ -812,6 +812,9 @@ async function hydrateSupabaseCache() {
     return;
   }
 
+  // Supabase is reachable. Keep the app in Supabase mode while cached data hydrates.
+  supabaseAvailable = true;
+
   try {
     const [rolesRes, usersRes, docsRes, resourcesRes, driveDocsRes, activityRes, departmentsRes, teamsRes, videosRes, quickActionsRes, ingestionJobsRes, ingestionResultsRes, ingestionFailuresRes] = await Promise.all([
       withTimeout(supabase.from("roles").select("*").limit(1000), DATA_HYDRATION_TIMEOUT_MS, { data: [], error: { message: "Supabase roles fetch timed out." } } as any),

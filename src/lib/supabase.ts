@@ -102,14 +102,6 @@ function createSafeSupabaseClient(): SupabaseClient {
 }
 
 export const supabase: SupabaseClient = supabaseClient ?? createSafeSupabaseClient();
-export const supabaseAdmin: SupabaseClient =
-  rawSupabaseUrl && rawSupabaseServiceRoleKey && supabaseUrlValidation.valid
-    ? createClient(rawSupabaseUrl, rawSupabaseServiceRoleKey, {
-        auth: {
-          persistSession: false,
-        },
-      })
-    : createSafeSupabaseClient();
 
 export function isSupabaseConfigured() {
   return Boolean(supabaseClient);

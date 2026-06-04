@@ -7,7 +7,7 @@ import { getProviderHealth, setDataProviderMode, subscribeToDataUpdates, onSupab
 import { connectDrive, attachDriveDocument, attachDriveFolder, getDriveDiagnostics, type DriveDiagnostics } from "@/services/drive";
 import { renderBlock } from "@/renderers";
 import { useSession } from "@/auth/useSession";
-import { ENABLE_GOOGLE_DRIVE, ENABLE_DRIVE_ATTACHMENTS, ENABLE_DEV_AUTH, ENABLE_GOOGLE_SIGN_IN } from "@/config/featureFlags";
+import { ENABLE_GOOGLE_DRIVE, ENABLE_DRIVE_ATTACHMENTS, ENABLE_DEV_AUTH } from "@/config/featureFlags";
 import { SectionNavigation } from "@/features/navigation/SectionNavigation";
 import { SignInPanel } from "@/features/auth/SignInPanel";
 import { HomePanel } from "@/features/dashboard/HomePanel";
@@ -164,6 +164,7 @@ export default function Page() {
   const [roleFormMessage, setRoleFormMessage] = useState("");
   const [showRoleEditor, setShowRoleEditor] = useState(false);
   const driveEnabled = ENABLE_GOOGLE_DRIVE || ENABLE_DRIVE_ATTACHMENTS;
+  const googleAuthConfigured = Boolean(providerHealth.diagnostics?.configured && providerHealth.diagnostics?.authMode !== "none");
   const router = useRouter();
 
   useEffect(() => {
@@ -226,15 +227,6 @@ export default function Page() {
       // ignore invalid cache entries
     }
   }, []);
-
-  useEffect(() => {
-    if (user) {
-      setSelectedSection((current) => (current === "signin" ? "home" : current));
-    } else {
-      setSelectedSection("signin");
-      setSelectedDocId(null);
-    }
-  }, [user]);
 
   useEffect(() => {
     setRoles(getRoles());
@@ -781,7 +773,7 @@ export default function Page() {
               enableDevAuth={ENABLE_DEV_AUTH}
               signInOptions={signInOptions}
               handleDevLogin={handleDevLogin}
-              googleAuthConfigured={ENABLE_GOOGLE_SIGN_IN}
+              googleAuthConfigured={googleAuthConfigured}
               googleAuthUnavailableMessage="Google Sign-In will be available after deployment."
             />
           ) : selectedSection === "home" ? (
