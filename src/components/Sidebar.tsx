@@ -5,14 +5,14 @@ import { useMemo, useState } from "react";
 import type { User } from "@/core/operon";
 
 const SECTION_ICONS: Record<string, string> = {
-  home: "⌂",
-  library: "◇",
-  resources: "✦",
-  activity: "◆",
-  finance: "$",
+  home: "H",
+  library: "📄",
+  resources: "🔗",
+  activity: "⚡",
+  finance: "💰",
   team: "👥",
-  roles: "⚙",
-  drive: "☁",
+  roles: "⚙️",
+  drive: "☁️",
 };
 
 const SECTION_LABELS: Record<string, string> = {
@@ -45,7 +45,6 @@ function getInitials(name: string) {
 }
 
 export function Sidebar({ user, roleLabel, sections, selectedSection, onSelect, onClose }: SidebarProps) {
-  const [collapsed, setCollapsed] = useState(false);
   const initials = useMemo(() => getInitials(user.name), [user.name]);
 
   const handleSelect = (section: string) => {
@@ -54,25 +53,22 @@ export function Sidebar({ user, roleLabel, sections, selectedSection, onSelect, 
   };
 
   return (
-    <aside
-      className={`flex flex-col overflow-hidden bg-bg-secondary transition-all duration-300 h-full ${
-        collapsed ? "w-20" : "w-64"
-      }`}
-    >
-      <div className="flex items-center justify-between px-4 py-4">
-        <div className="flex items-center gap-3 overflow-hidden">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-content-primary text-sm font-bold text-bg-primary">
+    <aside className="fixed left-4 top-4 bottom-4 w-72 flex flex-col glass-hero hover:shadow-glow transition-shadow hidden xl:flex">
+      {/* Header */}
+      <div className="p-6 border-b border-white/8">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-full bg-white/10 flex items-center justify-center font-semibold text-sm">
             O
           </div>
-          {!collapsed ? (
-            <div className="min-w-0">
-              <div className="truncate text-sm font-semibold text-content-primary">Operon</div>
-            </div>
-          ) : null}
+          <div>
+            <div className="font-600 text-sm text-white">Operon</div>
+            <div className="text-xs text-white/40">Workspace</div>
+          </div>
         </div>
       </div>
 
-      <nav className="flex-1 space-y-1 px-2 py-4">
+      {/* Navigation */}
+      <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
         {sections.map((section) => {
           const active = selectedSection === section;
           return (
@@ -80,52 +76,41 @@ export function Sidebar({ user, roleLabel, sections, selectedSection, onSelect, 
               key={section}
               type="button"
               onClick={() => handleSelect(section)}
-              title={SECTION_LABELS[section] ?? section}
-              className={`group flex w-full items-center gap-3 rounded-[10px] px-3 py-2.5 text-sm font-medium transition-all ${
+              className={`group w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 ${
                 active
-                  ? "bg-content-primary text-bg-primary"
-                  : "text-content-secondary hover:bg-bg-primary hover:text-content-primary"
+                  ? "bg-white/15 text-white border border-white/15"
+                  : "text-white/60 hover:text-white hover:bg-white/8 border border-transparent"
               }`}
             >
-              <span className="shrink-0 w-5 text-center">
-                {SECTION_ICONS[section] ?? "◆"}
-              </span>
-              {!collapsed ? <span className="truncate">{SECTION_LABELS[section] ?? section}</span> : null}
+              <span className="text-lg">{SECTION_ICONS[section]}</span>
+              <span className="text-sm font-500">{SECTION_LABELS[section]}</span>
             </button>
           );
         })}
       </nav>
 
-      <div className="border-t border-border/50 p-3">
-        <button
-          type="button"
-          onClick={() => setCollapsed(!collapsed)}
-          className="hidden xl:flex w-full h-10 items-center justify-center rounded-[10px] border border-border/50 text-xs text-content-secondary hover:text-content-primary transition"
-        >
-          {collapsed ? "▶" : "◀"}
-        </button>
-        {!collapsed && (
-          <div className="flex items-center gap-2.5 mt-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-[8px] bg-bg-primary text-xs font-semibold text-content-primary">
-              {user.avatar ? (
-                <Image
-                  src={user.avatar}
-                  alt={user.name}
-                  width={36}
-                  height={36}
-                  className="h-9 w-9 object-cover"
-                  unoptimized
-                />
-              ) : (
-                initials
-              )}
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-xs font-semibold text-content-primary">{user.name}</div>
-              <div className="truncate text-xs text-content-tertiary">{roleLabel}</div>
-            </div>
+      {/* Footer */}
+      <div className="p-4 border-t border-white/8 space-y-4">
+        <div className="flex items-center gap-3 px-2">
+          <div className="h-8 w-8 rounded-lg bg-white/10 flex items-center justify-center text-xs font-600 overflow-hidden">
+            {user.avatar ? (
+              <Image
+                src={user.avatar}
+                alt={user.name}
+                width={32}
+                height={32}
+                className="h-8 w-8 object-cover"
+                unoptimized
+              />
+            ) : (
+              initials
+            )}
           </div>
-        )}
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-600 text-white truncate">{user.name}</div>
+            <div className="text-xs text-white/40 truncate">{roleLabel}</div>
+          </div>
+        </div>
       </div>
     </aside>
   );

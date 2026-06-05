@@ -24,8 +24,8 @@ export function MVPAccessMode() {
 
   if (!loaded) {
     return (
-      <div className="flex min-h-screen items-center justify-center px-8">
-        <div className="rounded-[12px] border border-border bg-bg-secondary px-6 py-3 text-sm text-content-secondary">
+      <div className="flex min-h-screen items-center justify-center px-8 bg-black">
+        <div className="glass-card px-6 py-3 text-sm text-white/60">
           Loading…
         </div>
       </div>
@@ -33,18 +33,23 @@ export function MVPAccessMode() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-8 py-8">
-      <div className="w-full max-w-[440px]">
-        <div className="mb-12 text-center">
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-[12px] bg-content-primary text-xl font-semibold text-bg-primary shadow-soft">
-            O
+    <div className="flex min-h-screen items-center justify-center px-8 py-12 bg-black">
+      <div className="w-full max-w-2xl">
+        {/* Header */}
+        <div className="mb-16 text-center">
+          <div className="inline-flex items-center justify-center h-16 w-16 rounded-2xl bg-gradient-to-br from-white/15 to-white/5 backdrop-blur-xl mb-8">
+            <span className="text-2xl font-semibold">O</span>
           </div>
-          <h1 className="mt-6 text-3xl font-semibold text-content-primary">
+          <h1 className="text-5xl font-300 tracking-tight mb-3">
             Operon
           </h1>
+          <p className="text-white/50 text-base">
+            Select your workspace
+          </p>
         </div>
 
-        <div className="space-y-3">
+        {/* Role Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
           {ROLE_SELECTION_OPTIONS.map((role) => {
             const isSelected = role.id === selectedRoleId;
             return (
@@ -52,33 +57,43 @@ export function MVPAccessMode() {
                 key={role.id}
                 type="button"
                 onClick={() => setSelectedRoleId(role.id)}
-                className={`group flex w-full items-center justify-between rounded-[12px] border px-4 py-3 text-left transition-all ${
-                  isSelected
-                    ? "border-content-primary bg-content-primary/5 text-content-primary"
-                    : "border-border/50 text-content-primary hover:border-border/80"
-                } ${pendingRoleId ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}
                 disabled={Boolean(pendingRoleId)}
+                className={`group relative p-6 rounded-2xl transition-all duration-300 border ${
+                  isSelected
+                    ? "glass-hero border-white/20 bg-white/10 shadow-lg"
+                    : "glass-card border-white/8 hover:border-white/15 hover:bg-white/6"
+                }`}
               >
-                <span className="font-medium">{role.title}</span>
-                <span
-                  className={`h-2.5 w-2.5 rounded-full border transition-all ${
-                    isSelected
-                      ? "border-content-primary bg-content-primary"
-                      : "border-border bg-transparent"
-                  }`}
-                />
+                {/* Background gradient */}
+                <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-white/0 rounded-2xl opacity-0 group-hover:opacity-50 transition-opacity" />
+
+                <div className="relative">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-600 text-white">
+                      {role.title}
+                    </h3>
+                    <div
+                      className={`h-5 w-5 rounded-full border-2 transition-all ${
+                        isSelected
+                          ? "border-white bg-white"
+                          : "border-white/30 bg-transparent group-hover:border-white/50"
+                      }`}
+                    />
+                  </div>
+                </div>
               </button>
             );
           })}
         </div>
 
+        {/* Continue Button */}
         <button
           type="button"
           onClick={handleContinue}
-          className="mt-8 h-11 w-full rounded-[12px] bg-content-primary px-6 text-sm font-semibold text-bg-primary transition hover:bg-content-primary/90 disabled:opacity-50"
           disabled={!selectedRoleId || Boolean(pendingRoleId)}
+          className="w-full btn-premium h-12 font-600 text-white disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          Continue
+          {pendingRoleId ? "Continuing…" : "Continue"}
         </button>
       </div>
     </div>
