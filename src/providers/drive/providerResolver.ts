@@ -49,8 +49,8 @@ export function getDriveProviderDiagnostics(): DriveProviderDiagnostics {
   let message = "Local enterprise Drive provider is active.";
 
   if (!GOOGLE_DRIVE_CREDENTIALS_AVAILABLE && requestsEnabled) {
-    status = "degraded";
-    message = "Google Drive credentials are missing. Local enterprise Drive fallback is active.";
+    status = "unavailable";
+    message = "Google Drive was requested, but credentials are not configured. Local Drive fallback is only active when Google Drive is disabled.";
   }
 
   if (GOOGLE_DRIVE_CREDENTIALS_AVAILABLE) {

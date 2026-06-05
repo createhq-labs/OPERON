@@ -63,6 +63,7 @@ create table documents (
   tag text not null,
   allowed_role_ids text[] not null default '{}',
   allowed_user_types text[] not null default '{}',
+  allowed_team_ids text[] default null,
   assigned_user_ids text[] default null,
   read_time text,
   author_legacy_id text,
@@ -129,6 +130,7 @@ create table resources (
   allowed_role_ids text[] not null default '{}',
   allowed_user_types text[] not null default '{}',
   allowed_departments text[] default null,
+  allowed_team_ids text[] default null,
   visibility_scope text not null,
   created_by_id text,
   updated_at timestamptz not null default now(),
@@ -260,6 +262,7 @@ create table drive_documents (
   lifecycle_state text,
   visibility_scope text,
   allowed_departments text[] default null,
+  allowed_team_ids text[] default null,
   google_file_id text,
   google_doc_id text,
   drive_url text,
@@ -324,6 +327,20 @@ create index if not exists idx_uploads_storage_bucket on uploads (storage_bucket
 create index if not exists idx_uploads_storage_path on uploads (storage_path);
 create index if not exists idx_documents_storage_bucket on documents (storage_bucket);
 create index if not exists idx_documents_storage_path on documents (storage_path);
+create index if not exists idx_users_auth_user_id on users (auth_user_id);
+create index if not exists idx_users_role_legacy_id on users (role_legacy_id);
+create index if not exists idx_users_department_legacy_id on users (department_legacy_id);
+create index if not exists idx_documents_department_legacy_id on documents (department_legacy_id);
+create index if not exists idx_documents_author_legacy_id on documents (author_legacy_id);
+create index if not exists idx_documents_allowed_role_ids on documents using gin (allowed_role_ids);
+create index if not exists idx_documents_allowed_team_ids on documents using gin (allowed_team_ids);
+create index if not exists idx_documents_assigned_user_ids on documents using gin (assigned_user_ids);
+create index if not exists idx_resources_allowed_role_ids on resources using gin (allowed_role_ids);
+create index if not exists idx_resources_allowed_departments on resources using gin (allowed_departments);
+create index if not exists idx_resources_allowed_team_ids on resources using gin (allowed_team_ids);
+create index if not exists idx_drive_documents_department_legacy_id on drive_documents (department_legacy_id);
+create index if not exists idx_drive_documents_allowed_team_ids on drive_documents using gin (allowed_team_ids);
+create index if not exists idx_uploads_uploaded_by on uploads (uploaded_by);
 
 -- Row-level security policy examples for server-side enforcement.
 alter table documents enable row level security;
@@ -355,8 +372,40 @@ create policy "Allow document management for allowed roles" on documents
 
 alter table users enable row level security;
 create policy "Allow authenticated user reads" on users
-  for select using (auth.uid() is not null);
+  for select using (
+    auth.uid() is not null and (
+      auth_user_id = auth.uid()
+      or department_legacy_id = current_setting('request.jwt.claims.department_legacy_id', true)::text
+      or exists (
+        select 1 from roles r
+        join users u on u.role_legacy_id = r.legacy_id
+        where u.auth_user_id = auth.uid() and r.legacy_id = 'role_admin'
+      )
+    )
+  );
+
+create policy "Allow user insert with active auth user" on users
+  for insert with check (
+    auth.uid() is not null and auth_user_id = auth.uid() and status in ('active', 'invited', 'disabled')
+  );
+
+create policy "Allow user update by self or admin" on users
+  for update using (
+    auth.uid() is not null and (
+      auth_user_id = auth.uid()
+      or exists (
+        select 1 from roles r
+        join users u on u.role_legacy_id = r.legacy_id
+        where u.auth_user_id = auth.uid() and r.legacy_id = 'role_admin'
+      )
+    )
+  ) with check (auth.uid() is not null);
 
 alter table uploads enable row level security;
 create policy "Allow uploads for authenticated users" on uploads
-  for insert, select using (auth.uid() is not null);
+  for insert, select using (
+    auth.uid() is not null and exists (
+      select 1 from users u
+      where u.auth_user_id = auth.uid() and uploads.uploaded_by = u.legacy_id
+    )
+  );

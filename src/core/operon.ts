@@ -759,23 +759,76 @@ export function canManageTeamDocuments(user: User) {
   return hasPermission(user, "manage_team_documents") || isAdmin(user);
 }
 
+export function userMatchesAccessRestrictions(
+  user: User,
+  allowedRoleIds?: RoleId[],
+  assignedUserIds?: string[],
+  allowedDepartments?: DeptId[],
+  allowedTeamIds?: string[],
+) {
+  if (allowedRoleIds?.length && !allowedRoleIds.includes(user.roleId)) {
+    return false;
+  }
+
+  if (allowedDepartments?.length && (!user.departmentId || !allowedDepartments.includes(user.departmentId))) {
+    return false;
+  }
+
+  if (allowedTeamIds?.length && (!user.teamId || !allowedTeamIds.includes(user.teamId))) {
+    return false;
+  }
+
+  if (assignedUserIds?.length && !assignedUserIds.includes(user.id)) {
+    return false;
+  }
+
+  return true;
+}
 
 export function canViewDocument(user: User, document: Document) {
   if (isAdmin(user)) return true;
   if (!getUserEffectivePermissions(user).documents.view) return false;
   if (!document.allowedUserTypes.includes(user.userType)) return false;
 
-  const roleAllowed = document.allowedRoleIds.includes(user.roleId);
-  const userExplicitlyAllowed = document.assignedUserIds?.includes(user.id) ?? false;
-  return isVisibleToUser(user, document.visibilityScope, document.departmentId, document.allowedUserTypes, document.authorId) && (roleAllowed || userExplicitlyAllowed);
+  return (
+    isVisibleToUser(
+      user,
+      document.visibilityScope,
+      document.departmentId,
+      document.allowedUserTypes,
+      document.authorId,
+      document.allowedDepartments,
+      document.allowedTeamIds,
+    ) &&
+    userMatchesAccessRestrictions(
+      user,
+      document.allowedRoleIds,
+      document.assignedUserIds,
+      document.allowedDepartments,
+      document.allowedTeamIds,
+    )
+  );
 }
 
 export function canViewResource(user: User, resource: ResourceItem) {
   if (isAdmin(user)) return true;
   if (!resource.allowedUserTypes.includes(user.userType)) return false;
 
-  const roleAllowed = resource.allowedRoleIds.includes(user.roleId);
-  return isVisibleToUser(user, resource.visibilityScope, undefined, resource.allowedUserTypes, resource.createdById) && roleAllowed;
+  const roleAllowed = resource.allowedRoleIds.length === 0 || resource.allowedRoleIds.includes(user.roleId);
+  const departmentAllowed = !resource.allowedDepartments?.length || (user.departmentId ? resource.allowedDepartments.includes(user.departmentId) : false);
+  const teamAllowed = !resource.allowedTeamIds?.length || (user.teamId ? resource.allowedTeamIds.includes(user.teamId) : false);
+
+  return (
+    isVisibleToUser(
+      user,
+      resource.visibilityScope,
+      undefined,
+      resource.allowedUserTypes,
+      resource.createdById,
+      resource.allowedDepartments,
+      resource.allowedTeamIds,
+    ) && roleAllowed && departmentAllowed && teamAllowed
+  );
 }
 
 export function getAccessibleDocuments(user: User) {
@@ -844,9 +897,24 @@ export function canViewDriveDocument(user: User, document: DriveDocumentReferenc
   if (!getUserEffectivePermissions(user).documents.view) return false;
   if (!document.allowedUserTypes.includes(user.userType)) return false;
 
-  const roleAllowed = document.allowedRoleIds.includes(user.roleId);
-  const userExplicitlyAllowed = document.assignedUserIds?.includes(user.id) ?? false;
-  return isVisibleToUser(user, document.visibilityScope, document.departmentId, document.allowedUserTypes, document.authorId) && (roleAllowed || userExplicitlyAllowed);
+  return (
+    isVisibleToUser(
+      user,
+      document.visibilityScope,
+      document.departmentId,
+      document.allowedUserTypes,
+      document.authorId,
+      document.allowedDepartments,
+      document.allowedTeamIds,
+    ) &&
+    userMatchesAccessRestrictions(
+      user,
+      document.allowedRoleIds,
+      document.assignedUserIds,
+      document.allowedDepartments,
+      document.allowedTeamIds,
+    )
+  );
 }
 
 export function getAccessibleDriveDocuments(user: User) {

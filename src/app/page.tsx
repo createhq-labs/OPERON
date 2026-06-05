@@ -1,16 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { DeptId, DocTag, Document, DriveParsedDocument, ResourceCategory, Role, RoleId, User, UserType, VisibilityScope } from "@/core/operon";
 import { getProviderHealth, setDataProviderMode, subscribeToDataUpdates, onSupabaseHydrated } from "@/services/api";
-import { connectDrive, attachDriveDocument, attachDriveFolder, getDriveDiagnostics, type DriveDiagnostics } from "@/services/drive";
+import { connectDrive, attachDriveDocument, attachDriveFolder, getDriveDiagnostics, syncDrive, type DriveDiagnostics, type DriveSyncMode } from "@/services/drive";
 import { renderBlock } from "@/renderers";
 import { useSession } from "@/auth/useSession";
 import { ENABLE_GOOGLE_DRIVE, ENABLE_DRIVE_ATTACHMENTS } from "@/config/featureFlags";
-import { SectionNavigation } from "@/features/navigation/SectionNavigation";
-import { SignInPanel } from "@/features/auth/SignInPanel";
+import { MVPAccessMode } from "@/features/auth/MVPAccessMode";
 import { HomePanel } from "@/features/dashboard/HomePanel";
+import { DrivePanel } from "@/features/dashboard/DrivePanel";
+import { Sidebar } from "@/components/Sidebar";
 import {
   canAddDocuments,
   isAdmin,
@@ -51,6 +52,7 @@ import {
   searchDriveDocuments,
   searchResources,
 } from "@/core/operon";
+import { canManageDrive } from "@/security/permissions";
 
 const SECTION_NAMES = {
   signin: "Sign in",
@@ -61,6 +63,7 @@ const SECTION_NAMES = {
   finance: "Finance",
   team: "Team",
   roles: "Roles",
+  drive: "Drive",
   docs: "Document",
 } as const;
 
@@ -73,6 +76,18 @@ const TAG_LABELS: Record<DocTag, string> = {
   hr: "HR",
   internal: "Internal",
 };
+
+const LIBRARY_CATEGORIES: ReadonlyArray<{ id: string; label: string; tags: DocTag[] }> = [
+  { id: "all", label: "All", tags: ["sop", "hr", "ops", "creator", "onboarding", "brand", "internal"] },
+  { id: "hr", label: "HR", tags: ["hr"] },
+  { id: "finance", label: "Finance", tags: ["ops", "creator"] },
+  { id: "operations", label: "Operations", tags: ["ops", "internal"] },
+  { id: "training", label: "Training", tags: ["onboarding"] },
+  { id: "policies", label: "Policies", tags: ["sop", "hr"] },
+  { id: "sop", label: "SOPs", tags: ["sop"] },
+];
+
+export type LibraryCategoryId = (typeof LIBRARY_CATEGORIES)[number]["id"];
 
 const RESOURCE_CATEGORIES = [
   { id: "all", label: "All" },
@@ -96,10 +111,12 @@ type Section = keyof typeof SECTION_NAMES;
 type ResourceCategoryFilter = ResourceCategory | "all";
 
 export default function Page() {
-  const { user, loaded, signIn, signOut } = useSession();
+  const { user, loaded, signOut } = useSession();
   const [selectedSection, setSelectedSection] = useState<Section>("signin");
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
+  const [globalSearch, setGlobalSearch] = useState("");
   const [librarySearch, setLibrarySearch] = useState("");
+  const [libraryCategory, setLibraryCategory] = useState<LibraryCategoryId>("all");
   const [libraryDept, setLibraryDept] = useState<"all" | DeptId>("all");
   const [uploadTitle, setUploadTitle] = useState("");
   const [uploadCategory, setUploadCategory] = useState<DocTag>("sop");
@@ -113,8 +130,17 @@ export default function Page() {
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadStatus, setUploadStatus] = useState("");
   const [uploadError, setUploadError] = useState("");
+  const [uploadProgress, setUploadProgress] = useState("");
+  const [isDragActive, setIsDragActive] = useState(false);
+  const [droppedFileName, setDroppedFileName] = useState("");
   const [resourceQuery, setResourceQuery] = useState("");
   const [resourceCategory, setResourceCategory] = useState<ResourceCategoryFilter>("all");
+
+  const handleGlobalSearchChange = (value: string) => {
+    setGlobalSearch(value);
+    setLibrarySearch(value);
+    setResourceQuery(value);
+  };
   const [resourceTitle, setResourceTitle] = useState("");
   const [resourceHref, setResourceHref] = useState("");
   const [resourceAllowedRoleIds, setResourceAllowedRoleIds] = useState<RoleId[]>([
@@ -131,6 +157,23 @@ export default function Page() {
   const [resourceMessage, setResourceMessage] = useState("");
   const [dataVersion, setDataVersion] = useState(0);
   const [providerLoading, setProviderLoading] = useState(true);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const [documentView, setDocumentView] = useState<"grid" | "list">("grid");
+
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setIsSearchOpen(true);
+        window.setTimeout(() => searchInputRef.current?.focus(), 0);
+      }
+    };
+
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, []);
   const [providerReady, setProviderReady] = useState(false);
   const [providerHealth, setProviderHealth] = useState(getProviderHealth());
   const [driveDiagnostics, setDriveDiagnostics] = useState<DriveDiagnostics | null>(null);
@@ -141,6 +184,8 @@ export default function Page() {
   const [driveConnectionMessage, setDriveConnectionMessage] = useState("");
   const [driveUploadStatus, setDriveUploadStatus] = useState("");
   const [driveUploadError, setDriveUploadError] = useState("");
+  const [driveSyncStatus, setDriveSyncStatus] = useState("");
+  const [driveSyncing, setDriveSyncing] = useState(false);
   const [newName, setNewName] = useState("");
   const [newEmail, setNewEmail] = useState("");
   const [newRoleId, setNewRoleId] = useState<RoleId>("role_intern");
@@ -164,16 +209,6 @@ export default function Page() {
   const [roleFormMessage, setRoleFormMessage] = useState("");
   const [showRoleEditor, setShowRoleEditor] = useState(false);
   const driveEnabled = ENABLE_GOOGLE_DRIVE || ENABLE_DRIVE_ATTACHMENTS;
-  const googleAuthConfigured = Boolean(
-    providerHealth.providerMode === "supabase" &&
-      providerHealth.diagnostics?.configured &&
-      providerHealth.diagnostics?.authMode !== "none" &&
-      process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() &&
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim()
-  );
-  const googleAuthError = !googleAuthConfigured
-    ? providerHealth.diagnostics?.message || "Sign in is disabled until Supabase authentication is configured and available."
-    : undefined;
   const router = useRouter();
 
   useEffect(() => {
@@ -262,12 +297,40 @@ export default function Page() {
   );
   const libraryDocs = useMemo(() => {
     if (!user) return [];
-    return [...searchDocuments(user, librarySearch, libraryDept), ...searchDriveDocuments(user, librarySearch, libraryDept)];
-  }, [user, librarySearch, libraryDept]);
+
+    const results = [...searchDocuments(user, librarySearch, libraryDept), ...searchDriveDocuments(user, librarySearch, libraryDept)];
+    if (libraryCategory === "all") return results;
+
+    const category = LIBRARY_CATEGORIES.find((item) => item.id === libraryCategory);
+    if (!category) return results;
+
+    return results.filter((doc) => category.tags.includes(doc.tag));
+  }, [user, librarySearch, libraryDept, libraryCategory]);
   const resourceItems = useMemo(
     () => (user && canViewResources(user) ? searchResources(user, resourceQuery, resourceCategory === "all" ? undefined : resourceCategory) : []),
     [user, resourceQuery, resourceCategory]
   );
+  const globalSearchResults = useMemo(() => {
+    const query = globalSearch.trim().toLowerCase();
+    const docs = (query
+      ? accessibleDocs.filter((doc) =>
+          [doc.title, doc.description, doc.author, TAG_LABELS[doc.tag]]
+            .filter(Boolean)
+            .some((value) => value.toLowerCase().includes(query))
+        )
+      : accessibleDocs
+    ).slice(0, 6);
+    const resources = (query
+      ? resourceItems.filter((resource) =>
+          [resource.title, resource.description, resource.category]
+            .filter(Boolean)
+            .some((value) => value.toLowerCase().includes(query))
+        )
+      : resourceItems
+    ).slice(0, 4);
+
+    return { docs, resources };
+  }, [accessibleDocs, globalSearch, resourceItems]);
   const activityFeed = useMemo(() => (user ? getActivityFeed(user) : []), [user]);
   const creatableRoles = useMemo(() => (user ? getCreatableRoles(user) : []), [user]);
   const uploadRoles = useMemo(() => (user ? getCreatableRoles(user) : []), [user]);
@@ -286,6 +349,7 @@ export default function Page() {
     if (financeAccess) sections.push("finance");
     if (userCanManage) sections.push("team");
     if (roleManagerAccess) sections.push("roles");
+    if (canManageDrive(user)) sections.push("drive");
     return sections;
   }, [user, resourceCanView, activityCanView, userCanManage, roleManagerAccess, financeAccess]);
   const [selectedDoc, setSelectedDoc] = useState<Document | DriveParsedDocument | null>(null);
@@ -368,7 +432,7 @@ export default function Page() {
   async function handleLogout() {
     resetAppState();
     await signOut();
-    router.replace("/login");
+    router.replace("/");
   }
 
   function resetRoleForm() {
@@ -406,7 +470,7 @@ export default function Page() {
     const docs = Object.values(role.permissions.documents).filter(Boolean).length;
     const users = Object.values(role.permissions.users).filter(Boolean).length;
     const system = Object.values(role.permissions.system).filter(Boolean).length;
-    return `${docs}/5 docs • ${users}/4 users • ${system}/2 system`;
+    return `${docs}/5 docs - ${users}/4 users - ${system}/2 system`;
   }
 
   function handleSaveRole() {
@@ -466,6 +530,25 @@ export default function Page() {
     const result = await connectDrive();
     setDriveConnectionStatus(result.connected ? "Drive connected" : "Drive unavailable");
     setDriveConnectionMessage(result.message);
+  }
+
+  async function handleSyncDrive(mode: DriveSyncMode) {
+    setDriveSyncing(true);
+    setDriveSyncStatus(mode === "full" ? "Refreshing all files..." : "Refreshing recent files...");
+    try {
+      const result = await syncDrive(mode);
+      setDriveSyncStatus(`${result.synced} document${result.synced === 1 ? "" : "s"} refreshed.`);
+      setDataVersion((current) => current + 1);
+      try {
+        setDriveDiagnostics(await getDriveDiagnostics());
+      } catch {
+        // diagnostics refresh is best-effort
+      }
+    } catch (error) {
+      setDriveSyncStatus(error instanceof Error ? `Sync failed: ${error.message}` : "Drive sync failed.");
+    } finally {
+      setDriveSyncing(false);
+    }
   }
 
   function handleUploadFile(event: React.ChangeEvent<HTMLInputElement>) {
@@ -687,102 +770,190 @@ export default function Page() {
     }
   }
 
-  const aboutUser = user ? `${user.name} • ${getRoleLabel(user.roleId)}` : "Sign in to continue";
+  const localRoleLabel = user ? (user as User & { displayRoleName?: string }).displayRoleName : undefined;
+  const roleLabel = user ? localRoleLabel ?? getRoleLabel(user.roleId) : "";
+  const aboutUser = user
+    ? `${user.name} - ${roleLabel}`
+    : "Sign in to continue";
 
   if (!loaded) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-bg-primary text-content-primary">
-        <div className="rounded-3xl border border-border-subtle bg-bg-secondary p-6 text-sm text-content-secondary">Loading secure session…</div>
+        <div className="rounded-3xl border border-border-subtle bg-bg-secondary p-6 text-sm text-content-secondary">Preparing your workspace...</div>
+      </div>
+    );
+  }
+
+  if (loaded && !user) {
+    return (
+      <div className="min-h-screen bg-bg-primary text-content-primary">
+        <div className="mx-auto max-w-6xl px-6 py-12 sm:px-8">
+          <MVPAccessMode />
+        </div>
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-bg-primary text-content-primary">
-      <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
-        <header className="mb-7 flex flex-col gap-4 rounded-[32px] border border-border bg-bg-secondary/80 p-6 shadow-soft backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-xs uppercase tracking-[0.35em] text-content-tertiary">Operon</p>
-            <h1 className="mt-3 text-3xl font-semibold tracking-tight text-content-primary">Operational knowledge, simplified.</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-content-secondary">A focused workspace for SOPs, document access, and role-based controls.</p>
+      {isMobileNavOpen && user ? (
+        <div className="fixed inset-0 z-40 xl:hidden">
+          <button
+            type="button"
+            aria-label="Close navigation"
+            onClick={() => setIsMobileNavOpen(false)}
+            className="absolute inset-0 bg-black/50"
+          />
+          <div className="absolute left-4 top-4 h-[calc(100vh-32px)]">
+            <Sidebar
+              user={user}
+              roleLabel={roleLabel}
+              sections={visibleSections}
+              selectedSection={selectedSection}
+              onClose={() => setIsMobileNavOpen(false)}
+              onSelect={(section) => {
+                setSelectedSection(section as Section);
+                if (section !== "docs") setSelectedDocId(null);
+              }}
+            />
           </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="rounded-full border border-border bg-bg-primary/80 px-4 py-2 text-sm text-content-primary">{aboutUser}</span>
-            {user ? (
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="flex h-10 items-center justify-center rounded-full border border-border bg-bg-secondary px-4 text-sm font-semibold text-content-primary transition hover:border-primary hover:bg-bg-secondary"
-              >
-                Sign out
-              </button>
-            ) : null}
-          </div>
-        </header>
+        </div>
+      ) : null}
 
-        {providerHealth.status !== "connected" ? (
-          <div className="mb-6 operon-panel-strong p-4 text-sm text-content-secondary">
-            <div>{providerHealth.status === "offline" || providerHealth.status === "fallback" || providerHealth.status === "degraded"
-              ? "Running in local enterprise mode. Supabase is unavailable or degraded, so the app continues with local access and cached data."
-              : providerHealth.message}</div>
-            {providerHealth.diagnostics ? (
-              <div className="mt-3 rounded-3xl border border-border-subtle bg-bg-primary/90 p-3 text-xs text-content-secondary">
-                <div className="font-semibold text-content-primary">Supabase diagnostics</div>
-                <div className="mt-2 grid gap-2 text-sm">
-                  <div>Configured: {providerHealth.diagnostics.configured ? "yes" : "no"}</div>
-                  <div>Resolved URL: {providerHealth.diagnostics.url || "<missing>"}</div>
-                  <div>Provider mode: {providerHealth.providerMode}</div>
-                  <div>Effective mode: {providerHealth.effectiveProviderMode}</div>
-                  <div>Fallback mode: {providerHealth.fallbackMode ? "enabled" : "disabled"}</div>
-                  <div>Auth mode: {providerHealth.diagnostics.authMode}</div>
-                </div>
-                {providerHealth.diagnostics.warnings?.length ? (
-                  <div className="mt-3 rounded-3xl border border-border-subtle bg-bg-primary/95 p-3 text-xs text-content-secondary">
-                    <div className="font-semibold text-content-primary">Warnings</div>
-                    <ul className="mt-2 list-disc pl-5 space-y-1">
-                      {providerHealth.diagnostics.warnings.map((warning, index) => (
-                        <li key={index}>{warning}</li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
+      {isSearchOpen ? (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 px-4 pt-24 backdrop-blur-sm">
+          <button
+            type="button"
+            aria-label="Close search"
+            onClick={() => setIsSearchOpen(false)}
+            className="absolute inset-0"
+          />
+          <div className="relative w-full max-w-3xl rounded-[32px] border border-border bg-bg-secondary p-4 shadow-soft">
+            <label htmlFor="global-search" className="sr-only">Search Operon</label>
+            <input
+              id="global-search"
+              ref={searchInputRef}
+              value={globalSearch}
+              onChange={(event) => handleGlobalSearchChange(event.target.value)}
+              placeholder="Search documents and resources"
+              className="operon-input h-14 w-full px-6 text-base"
+            />
+            <div className="mt-4 grid max-h-[60vh] gap-3 overflow-y-auto pr-1">
+              {globalSearchResults.docs.map((doc) => (
+                <button
+                  key={`search-${doc.id}`}
+                  type="button"
+                  onClick={() => {
+                    showDoc(doc.id);
+                    setIsSearchOpen(false);
+                  }}
+                  className="rounded-[24px] border border-border bg-bg-primary/80 p-4 text-left transition hover:border-border-strong"
+                >
+                  <div className="font-semibold text-content-primary">{doc.title}</div>
+                  <p className="mt-1 truncate text-sm text-content-secondary">{doc.description}</p>
+                </button>
+              ))}
+              {globalSearchResults.resources.map((resource) => (
+                <a
+                  key={`search-${resource.id}`}
+                  href={resource.href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-[24px] border border-border bg-bg-primary/80 p-4 text-left transition hover:border-border-strong"
+                >
+                  <div className="font-semibold text-content-primary">{resource.title}</div>
+                  <p className="mt-1 truncate text-sm text-content-secondary">{resource.description}</p>
+                </a>
+              ))}
+              {globalSearchResults.docs.length === 0 && globalSearchResults.resources.length === 0 ? (
+                <div className="operon-empty-state p-8 text-center text-sm text-content-secondary">No matches found.</div>
+              ) : null}
+            </div>
           </div>
-        ) : null}
+        </div>
+      ) : null}
 
-        {user && (
-          <SectionNavigation
+      <div className="mx-auto grid max-w-[1400px] gap-8 px-4 py-4 md:px-8 xl:grid-cols-[240px_minmax(0,1fr)]">
+        {user ? (
+          <div className="hidden xl:block">
+          <Sidebar
+            user={user}
+            roleLabel={roleLabel}
             sections={visibleSections}
             selectedSection={selectedSection}
-            labels={SECTION_NAMES}
             onSelect={(section) => {
               setSelectedSection(section as Section);
               if (section !== "docs") setSelectedDocId(null);
             }}
           />
-        )}
-
-        {providerHealth.status !== "connected" ? (
-          <div className="rounded-[28px] border border-amber-200 bg-amber-50 p-5 text-sm text-amber-700">
-            {providerHealth.message}
           </div>
         ) : null}
 
-        <div className="space-y-5">
+        <main className="min-w-0 space-y-8">
+          <header className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <button
+                type="button"
+                onClick={() => setIsMobileNavOpen(true)}
+                className="flex h-12 items-center justify-center rounded-[20px] border border-border bg-bg-secondary px-4 text-sm font-semibold text-content-primary shadow-card xl:hidden"
+                aria-label="Open navigation"
+              >
+                Menu
+              </button>
+              <div>
+                <p className="text-sm font-medium text-content-tertiary">{SECTION_NAMES[selectedSection] ?? "Workspace"}</p>
+                <h1 className="mt-1 text-2xl font-semibold tracking-tight text-content-primary">OPERON</h1>
+              </div>
+            </div>
+            <div className="flex items-center gap-4">
+              <button
+                type="button"
+                onClick={() => setIsSearchOpen(true)}
+                className="hidden h-12 items-center gap-4 rounded-[20px] border border-border bg-bg-secondary px-4 text-sm text-content-secondary shadow-card transition hover:border-border-strong hover:text-content-primary sm:flex"
+              >
+                <span>Search</span>
+                <span className="rounded-full bg-bg-primary px-3 py-1 text-xs text-content-tertiary">Ctrl K</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="h-12 rounded-[20px] border border-border bg-bg-secondary px-4 text-sm font-semibold text-content-primary shadow-card transition hover:border-border-strong"
+              >
+                Sign out
+              </button>
+            </div>
+          </header>
+
+          <div className="hidden">
+            <label htmlFor="legacy-global-search" className="sr-only">Search Operon</label>
+            <div className="relative">
+              <input
+                id="legacy-global-search"
+                value={globalSearch}
+                onChange={(event) => handleGlobalSearchChange(event.target.value)}
+                placeholder="Search documents, SOPs, policies, teams, resources"
+                className="operon-input w-full rounded-3xl border border-border-subtle bg-bg-primary/80 px-4 py-3 text-sm text-content-primary outline-none transition focus:border-accent"
+              />
+              <div className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-xs text-content-tertiary">Ctrl K</div>
+            </div>
+          </div>
+
+          {providerHealth.status !== "connected" ? (
+            <div className="mb-6 rounded-[28px] border border-border bg-bg-secondary/80 p-5 text-sm text-content-secondary">
+              Feature temporarily unavailable.
+            </div>
+          ) : null}
+
+        <div className="space-y-8">
           {!user || selectedSection === "signin" ? (
-            <SignInPanel
-              signIn={signIn}
-              googleAuthConfigured={googleAuthConfigured}
-              authError={googleAuthError}
-            />
+            <MVPAccessMode />
           ) : selectedSection === "home" ? (
             <HomePanel
               user={user}
-              providerHealth={providerHealth}
               providerLoading={providerLoading}
               driveDiagnostics={driveDiagnostics}
               displayQuickActions={displayQuickActions}
+              accessibleDocs={accessibleDocs}
               pinnedDocs={pinnedDocs}
               onActionSelect={(section) => {
                 setSelectedSection(section as Section);
@@ -791,24 +962,45 @@ export default function Page() {
               onShowDoc={showDoc}
             />
           ) : selectedSection === "library" ? (
-            <section className="grid gap-4 xl:grid-cols-[1.4fr_0.8fr]">
-              <div className="operon-panel p-6">
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <h2 className="text-xl font-semibold text-content-primary">Document Library</h2>
-                    <p className="mt-2 text-sm leading-6 text-content-secondary">Browse the SOPs and resources that are explicitly assigned to your access set.</p>
+            <section className="grid gap-8 xl:grid-cols-[1.4fr_0.8fr]">
+              <div className="operon-panel p-8">
+                <div className="flex flex-col gap-8">
+                  <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-content-tertiary">Documents</p>
+                      <h2 className="mt-2 text-3xl font-semibold tracking-tight text-content-primary">File browser</h2>
+                    </div>
+                    <div className="flex rounded-[20px] border border-border bg-bg-primary/80 p-1">
+                      {(["grid", "list"] as const).map((view) => (
+                        <button
+                          key={view}
+                          type="button"
+                          onClick={() => setDocumentView(view)}
+                          className={`h-10 rounded-[16px] px-4 text-sm font-semibold capitalize transition ${
+                            documentView === view ? "bg-content-primary text-bg-primary" : "text-content-secondary hover:text-content-primary"
+                          }`}
+                        >
+                          {view}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
+
+                  <div className="grid gap-4 lg:grid-cols-[1fr_220px]">
                     <input
                       value={librarySearch}
-                      onChange={(event) => setLibrarySearch(event.target.value)}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setLibrarySearch(value);
+                        setGlobalSearch(value);
+                      }}
                       placeholder="Search documents"
-                      className="operon-input w-full px-4 py-3 text-sm"
+                      className="operon-input h-12 w-full px-4 text-sm"
                     />
                     <select
                       value={libraryDept}
                       onChange={(event) => setLibraryDept(event.target.value as "all" | DeptId)}
-                      className="operon-input w-full px-4 py-3 text-sm"
+                      className="operon-input h-12 w-full px-4 text-sm"
                     >
                       {getDepartmentFilters().map((filter) => (
                         <option key={filter.id} value={filter.id}>
@@ -817,26 +1009,65 @@ export default function Page() {
                       ))}
                     </select>
                   </div>
+
+                  {pinnedDocs.length > 0 ? (
+                    <div className="grid gap-4 sm:grid-cols-3">
+                      {pinnedDocs.slice(0, 3).map((doc) => (
+                        <button
+                          key={`pin-${doc.id}`}
+                          type="button"
+                          onClick={() => showDoc(doc.id)}
+                          className="rounded-[24px] border border-border bg-bg-primary/70 p-4 text-left transition hover:border-border-strong hover:bg-bg-primary"
+                        >
+                          <div className="mb-4 h-20 rounded-[20px] bg-bg-secondary" />
+                          <div className="truncate font-semibold text-content-primary">{doc.title}</div>
+                          <p className="mt-1 text-xs text-content-tertiary">Pinned</p>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  <div className="flex flex-wrap gap-2">
+                    {LIBRARY_CATEGORIES.map((category) => (
+                      <button
+                        key={category.id}
+                        type="button"
+                        onClick={() => setLibraryCategory(category.id)}
+                        className={`rounded-full border px-4 py-2 text-xs font-semibold transition ${
+                          libraryCategory === category.id
+                            ? "border-content-primary bg-content-primary text-bg-primary"
+                            : "border-border bg-bg-primary/80 text-content-secondary hover:border-border-strong hover:text-content-primary"
+                        }`}
+                      >
+                        {category.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div className="mt-5 grid gap-3">
+                <div className={documentView === "grid" ? "mt-8 grid gap-4 sm:grid-cols-2 2xl:grid-cols-3" : "mt-8 grid gap-4"}>
                   {providerLoading && libraryDocs.length === 0 ? (
-                    <div className="rounded-3xl border border-border-subtle bg-bg-primary/80 p-5 text-sm text-content-tertiary">Loading your document library from Supabase...</div>
+                    <div className="operon-empty-state p-8 text-sm text-content-secondary">Preparing your documents...</div>
                   ) : libraryDocs.length > 0 ? (
                     libraryDocs.map((doc) => (
                       <button
                         key={doc.id}
                         type="button"
                         onClick={() => showDoc(doc.id)}
-                        className="w-full rounded-3xl border border-border-subtle bg-bg-primary/80 px-4 py-3 text-left text-sm text-content-primary transition hover:border-accent-soft"
+                        className={`w-full rounded-[28px] border border-border bg-bg-primary/70 text-left text-sm text-content-primary transition hover:-translate-y-0.5 hover:border-border-strong hover:bg-bg-primary ${
+                          documentView === "grid" ? "p-5" : "p-4"
+                        }`}
                       >
-                        <div className="flex items-center justify-between gap-3">
-                          <div>
-                            <div className="font-semibold">{doc.title}</div>
-                            <p className="mt-1 text-sm text-content-secondary">{doc.description}</p>
+                        <div className={`flex gap-4 ${documentView === "grid" ? "flex-col" : "items-center"}`}>
+                          <div className={`${documentView === "grid" ? "h-28 w-full" : "h-16 w-16 shrink-0"} rounded-[24px] bg-bg-secondary`} />
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate font-semibold">{doc.title}</div>
+                            <p className="mt-2 line-clamp-2 text-sm leading-6 text-content-secondary">{doc.description}</p>
                           </div>
                           <div className="flex flex-wrap gap-2">
                             {doc.source === "google_drive" ? (
-                              <span className="rounded-full bg-blue-100 px-3 py-1 text-[11px] text-blue-700">Google Drive</span>
+                              <span className="rounded-full bg-bg-secondary px-3 py-1 text-[11px] text-content-tertiary">Drive</span>
+                            ) : doc.source === "local_drive" ? (
+                              <span className="rounded-full bg-bg-secondary px-3 py-1 text-[11px] text-content-tertiary">Local</span>
                             ) : null}
                             <span className="rounded-full bg-bg-secondary px-3 py-1 text-[11px] text-content-tertiary">{TAG_LABELS[doc.tag]}</span>
                           </div>
@@ -844,7 +1075,7 @@ export default function Page() {
                       </button>
                     ))
                   ) : (
-                    <p className="text-sm text-content-tertiary">No documents match your current filters.</p>
+                    <div className="operon-empty-state p-8 text-sm text-content-secondary">No documents match your filters.</div>
                   )}
                 </div>
               </div>
@@ -854,9 +1085,22 @@ export default function Page() {
                   <div className="operon-panel p-6">
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <p className="text-xs uppercase tracking-[0.18em] text-content-tertiary">Upload SOP</p>
-                        <h3 className="mt-2 text-lg font-semibold text-content-primary">Add a new document</h3>
+                        <p className="text-xs uppercase tracking-[0.18em] text-content-tertiary">Document workflow</p>
+                        <h3 className="mt-2 text-lg font-semibold text-content-primary">Add a document or connect Drive content</h3>
                       </div>
+                    </div>
+                    <div className="mt-5 rounded-3xl border border-border-subtle bg-bg-primary/80 p-4 text-sm text-content-secondary">
+                      {driveEnabled ? (
+                        <>
+                          <p className="font-semibold text-content-primary">Google Drive sync</p>
+                          <p className="mt-2">Connect Drive to link documents and folders, then sync content into the library. Role permissions control which linked documents are visible.</p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="font-semibold text-content-primary">Drive integration disabled</p>
+                          <p className="mt-2">Enable Google Drive in configuration to link Drive documents and folders from this panel.</p>
+                        </>
+                      )}
                     </div>
                     <div className="mt-5 space-y-4">
                       <input
@@ -1009,10 +1253,10 @@ export default function Page() {
                               onClick={handleConnectDrive}
                               className="h-10 w-full rounded-3xl border border-border-subtle bg-bg-primary/80 px-4 text-sm font-semibold text-content-primary transition hover:bg-bg-secondary"
                             >
-                              Connect Drive
+                              Connect Google Drive
                             </button>
                             <div className="rounded-3xl border border-border-subtle bg-bg-primary/80 px-4 py-3 text-sm text-content-secondary">
-                              {driveConnectionStatus || "Drive integration is not enabled."}
+                              {driveConnectionStatus || (driveEnabled ? "Connect your Drive account to link documents and folders." : "Drive integration is not enabled.")}
                               {driveConnectionMessage ? <div className="mt-2 text-xs text-content-tertiary">{driveConnectionMessage}</div> : null}
                             </div>
                           </div>
@@ -1042,6 +1286,26 @@ export default function Page() {
                           >
                             Attach Drive folder
                           </button>
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <button
+                              type="button"
+                              onClick={() => void handleSyncDrive("incremental")}
+                              disabled={driveSyncing}
+                              className="h-10 w-full rounded-3xl border border-border-subtle bg-bg-primary/80 px-4 text-sm font-semibold text-content-primary transition hover:bg-bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              Incremental sync
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void handleSyncDrive("full")}
+                              disabled={driveSyncing}
+                              className="h-10 w-full rounded-3xl border border-border-subtle bg-bg-primary/80 px-4 text-sm font-semibold text-content-primary transition hover:bg-bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              Full sync
+                            </button>
+                          </div>
+                          {driveSyncStatus && <p className="text-sm text-content-tertiary">{driveSyncStatus}</p>}
+                          <p className="mt-3 text-sm text-content-secondary">After Drive sync completes, linked documents appear in the library if your role has permission to view them.</p>
                           {driveUploadStatus && <p className="text-sm text-content-tertiary">{driveUploadStatus}</p>}
                           {driveUploadError && <p className="text-sm text-rose-500">{driveUploadError}</p>}
                         </div>
@@ -1088,7 +1352,7 @@ export default function Page() {
                 </div>
                 <div className="mt-5 grid gap-3">
                   {providerLoading && resourceItems.length === 0 ? (
-                    <div className="rounded-3xl border border-border-subtle bg-bg-primary/80 p-5 text-sm text-content-tertiary">Loading team resources from Supabase...</div>
+                    <div className="rounded-3xl border border-border-subtle bg-bg-primary/80 p-5 text-sm text-content-tertiary">Preparing resources...</div>
                   ) : resourceItems.length > 0 ? (
                     resourceItems.map((resource) => (
                       <a
@@ -1252,7 +1516,7 @@ export default function Page() {
                 <div className="mt-4 space-y-3">
                   <p className="text-sm text-content-secondary">This area is reserved for finance teams and published controls that require strict role-based access.</p>
                   {providerLoading ? (
-                    <div className="rounded-3xl border border-border-subtle bg-bg-primary/80 p-4 text-sm text-content-tertiary">Loading finance links and notices from Supabase...</div>
+                    <div className="rounded-3xl border border-border-subtle bg-bg-primary/80 p-4 text-sm text-content-tertiary">Preparing finance links...</div>
                   ) : null}
                   {FINANCE_MENU_ITEMS.map((item) => (
                     <div key={item.id} className="rounded-3xl border border-border-subtle bg-bg-primary/80 px-4 py-3 text-sm text-content-primary">
@@ -1281,7 +1545,7 @@ export default function Page() {
                         <div key={event.id} className="rounded-3xl border border-border-subtle bg-bg-primary/80 p-5">
                           <div className="text-sm text-content-tertiary">{event.action.replace(/_/g, " ")}</div>
                           <div className="mt-2 text-base font-semibold text-content-primary">{itemTitle ?? "Unknown item"}</div>
-                          <div className="mt-1 text-sm text-content-secondary">{actor?.name ?? "Unknown user"} • {new Date(event.timestamp).toLocaleString()}</div>
+                          <div className="mt-1 text-sm text-content-secondary">{actor?.name ?? "Unknown user"} - {new Date(event.timestamp).toLocaleString()}</div>
                         </div>
                       );
                     })
@@ -1475,6 +1739,12 @@ export default function Page() {
                 </div>
               </aside>
             </section>
+          ) : selectedSection === "drive" ? (
+            <DrivePanel
+              user={user}
+              driveDiagnostics={driveDiagnostics}
+              onDiagnosticsUpdate={setDriveDiagnostics}
+            />
           ) : selectedSection === "team" ? (
             <section className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
               <div className="rounded-[28px] border border-border bg-bg-secondary p-6 shadow-card">
@@ -1670,6 +1940,7 @@ export default function Page() {
             </section>
           ) : null}
         </div>
+      </main>
       </div>
     </div>
   );

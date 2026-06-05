@@ -97,7 +97,18 @@ function mapSupabaseRow<T>(row: Record<string, any>): T {
   const mapped: Record<string, any> = {};
 
   for (const [key, value] of Object.entries(row)) {
-    const normalizedKey = key === "legacy_id" ? "id" : key.replace(/_([a-z])/g, (_, char) => char.toUpperCase());
+    let normalizedKey: string;
+
+    if (key === "legacy_id") {
+      normalizedKey = "id";
+    } else if (key.endsWith("_legacy_id")) {
+      normalizedKey = key
+        .slice(0, -"_legacy_id".length)
+        .replace(/_([a-z])/g, (_, char) => char.toUpperCase()) + "Id";
+    } else {
+      normalizedKey = key.replace(/_([a-z])/g, (_, char) => char.toUpperCase());
+    }
+
     mapped[normalizedKey] = value;
   }
 

@@ -213,7 +213,9 @@ export class SupabaseAuthAdapter implements AuthAdapter {
     });
 
     return {
-      unsubscribe: () => subscription?.data?.subscription?.unsubscribe?.() ?? undefined,
+      unsubscribe: () => {
+        subscription?.data?.subscription?.unsubscribe?.();
+      },
     };
   }
 }

@@ -5,6 +5,15 @@ import { enqueueIngestionJob, getIngestionJobs, startIngestionWorker } from "@/s
 import { saveDriveDocumentReference, updateDriveDocumentSyncMetadata, saveActivity, getDriveDocumentById, getDriveDocuments, getDocuments } from "@/services/api";
 import { getSearchIndexVersion } from "@/services/search/sync";
 import type { DriveDocumentReference, DriveDocumentPermission } from "@/core/operon";
+import { canManageDrive } from "@/security/permissions";
+
+// Shared type for API responses
+interface ApiResponse<T = unknown> {
+  success: boolean;
+  message?: string;
+  data?: T;
+  error?: string;
+}
 
 function parseCookies(cookieHeader: string | null) {
   if (!cookieHeader) return {} as Record<string, string>;
@@ -31,12 +40,25 @@ function decodeJwt(token: string) {
 function getUserIdFromRequest(request: NextRequest) {
   const authHeader = request.headers.get("authorization") || request.headers.get("Authorization");
   const bearerToken = authHeader?.startsWith("Bearer ") ? authHeader.replace(/^Bearer\s+/i, "") : undefined;
-  const token = bearerToken || parseCookies(request.headers.get("cookie"))["sb-access-token"];
-  if (!token) return null;
-  const payload = decodeJwt(token);
-  if (!payload) return null;
-  if (payload.exp && Date.now() / 1000 > payload.exp) return null;
-  return payload.sub || payload.user_id || null;
+  const cookies = parseCookies(request.headers.get("cookie"));
+  const token = bearerToken || cookies["sb-access-token"];
+  if (token) {
+    const payload = decodeJwt(token);
+    if (payload && !(payload.exp && Date.now() / 1000 > payload.exp)) {
+      return payload.sub || payload.user_id || null;
+    }
+  }
+
+  return null;
+}
+
+async function getCurrentUser(userId: string) {
+  try {
+    const users = require("@/services/api").getAllUsers?.() ?? [];
+    return users.find((u: any) => u.id === userId || u.auth_user_id === userId);
+  } catch {
+    return null;
+  }
 }
 
 async function getCurrentDriveAccount(request: NextRequest, accountId?: string) {
@@ -50,12 +72,12 @@ async function getCurrentDriveAccount(request: NextRequest, accountId?: string) 
   return accounts[0];
 }
 
-function buildErrorResponse(message: string, status = 400) {
-  return NextResponse.json({ success: false, message }, { status });
+function buildErrorResponse(message: string, status = 400): NextResponse {
+  return NextResponse.json({ success: false, message, error: message }, { status });
 }
 
-function safeJsonResponse(value: unknown) {
-  return NextResponse.json(value, { status: 200 });
+function buildSuccessResponse(data: unknown = null): NextResponse {
+  return NextResponse.json({ success: true, data });
 }
 
 function buildSafeDriveDocument(document: DriveDocumentReference) {
@@ -115,12 +137,78 @@ async function createDocumentPayloadFromMetadata(
     syncStatus: "pending",
     lastSyncedAt: now,
     lastDriveModifiedAt: fileMetadata.modifiedTime || now,
+    lastDriveCreatedAt: fileMetadata.createdTime || now,
     extractedText: undefined,
     parsedBlocks: [],
     parserStatus: "pending",
     parserVersion: "1.0",
   };
   return document;
+}
+
+/**
+ * Re-sync a single Drive document: refresh metadata, mark it syncing, and re-enqueue
+ * ingestion so its parsed content/searchable text is rebuilt. Works in both local
+ * fallback mode and live Google mode. Returns the resolved sync status.
+ */
+async function resyncDriveDocument(
+  document: DriveDocumentReference,
+  userId: string,
+  account: Awaited<ReturnType<typeof getCurrentDriveAccount>>,
+  localMode: boolean
+): Promise<"syncing" | "synced"> {
+  const now = new Date().toISOString();
+  updateDriveDocumentSyncMetadata(document.id, { syncStatus: "syncing", lastSyncedAt: now, updatedById: userId });
+
+  if (localMode || !account) {
+    updateDriveDocumentSyncMetadata(document.id, {
+      syncStatus: "synced",
+      lastSyncedAt: now,
+      lastDriveModifiedAt: document.lastDriveModifiedAt || now,
+      updatedAt: now,
+      updatedById: userId,
+    });
+    await startIngestionWorker();
+    return "synced";
+  }
+
+  const accessToken = await getValidAccessToken(account);
+  const metadata = await fetchDriveFileMetadata(accessToken, document.driveFileId);
+  updateDriveDocumentSyncMetadata(document.id, {
+    lastSyncedAt: now,
+    lastDriveModifiedAt: metadata.modifiedTime || now,
+    lastDriveCreatedAt: metadata.createdTime || document.lastDriveCreatedAt,
+    updatedAt: now,
+    updatedById: userId,
+  });
+
+  if (metadata.mimeType !== "application/vnd.google-apps.folder") {
+    const parserType = determineParserType(metadata.mimeType);
+    const rawPayload =
+      metadata.mimeType === "application/vnd.google-apps.document"
+        ? await fetchGoogleDocsDocument(accessToken, metadata.id)
+        : await extractDriveExportPayload(accessToken, metadata.id, metadata);
+    enqueueIngestionJob({
+      documentId: document.id,
+      sourceType: "googleDrive",
+      parserType,
+      sourceUrl: document.driveUrl,
+      fileName: metadata.name,
+      mimeType: metadata.mimeType,
+      metadata: { departmentId: document.departmentId, tags: [document.tag], authorId: document.authorId },
+      rawPayload,
+    });
+    // Ingestion worker drives the doc to "synced"/"failed" on completion.
+    return "syncing";
+  }
+
+  updateDriveDocumentSyncMetadata(document.id, { syncStatus: "synced", lastSyncedAt: now, updatedAt: now });
+  return "synced";
+}
+
+/** Documents that need an incremental sync: never synced, stale, or previously failed. */
+function needsIncrementalSync(document: DriveDocumentReference): boolean {
+  return document.syncStatus === "pending" || document.syncStatus === "stale" || document.syncStatus === "failed";
 }
 
 export async function GET(request: NextRequest) {
@@ -132,7 +220,7 @@ export async function GET(request: NextRequest) {
   if (action === "status") {
     const localMode = !isGoogleDriveAuthConfigured();
     if (localMode) {
-      return safeJsonResponse({
+      return buildSuccessResponse({
         connected: true,
         provider: "local",
         message: "Local enterprise Drive fallback is active.",
@@ -145,7 +233,7 @@ export async function GET(request: NextRequest) {
       return buildErrorResponse("Unauthorized: missing Supabase session", 401);
     }
     const legacyAccounts = await findDriveAccounts(userId);
-    return safeJsonResponse({
+    return buildSuccessResponse({
       connected: legacyAccounts.length > 0,
       provider: "google",
       message: "Google Drive connector status retrieved.",
@@ -171,7 +259,7 @@ export async function GET(request: NextRequest) {
       parsed: documents.filter((doc) => doc.parserStatus === "parsed").length,
       failed: documents.filter((doc) => doc.parserStatus === "failed").length,
     };
-    return safeJsonResponse({
+    return buildSuccessResponse({
       activeProvider: localMode ? "LocalDriveProvider" : "GoogleDriveProvider",
       providerMode: localMode ? "local" : "google",
       status: localMode ? "local" : "connected",
@@ -200,7 +288,7 @@ export async function GET(request: NextRequest) {
       if (!document) {
         return buildErrorResponse("Drive document not found", 404);
       }
-      return safeJsonResponse({
+      return buildSuccessResponse({
         documentId: document.id,
         title: document.title,
         body: {
@@ -225,7 +313,7 @@ export async function GET(request: NextRequest) {
     }
     const accessToken = await getValidAccessToken(account);
     const googleDoc = await fetchGoogleDocsDocument(accessToken, documentId);
-    return safeJsonResponse(googleDoc);
+    return buildSuccessResponse(googleDoc);
   }
 
   if (action === "callback") {
@@ -283,17 +371,42 @@ export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({}));
 
   if (action === "auth") {
+    const userId = getUserIdFromRequest(request);
+    if (!userId) {
+      return buildErrorResponse("Unauthorized: missing session", 401);
+    }
+
+    // Check if user has permission to manage Drive
+    try {
+      const { getAllUsers } = require("@/services/api");
+      const users = getAllUsers?.() ?? [];
+      const user = users.find((u: any) => u.id === userId || u.auth_user_id === userId);
+      if (!user || !canManageDrive(user)) {
+        await saveActivity({
+          id: `activity-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          userId,
+          action: "SYSTEM_EVENT",
+          targetType: "system",
+          timestamp: new Date().toISOString(),
+          metadata: { event: "drive_auth_denied", reason: "insufficient_permissions" },
+        });
+        return buildErrorResponse("Your role does not have permission to manage Drive accounts", 403);
+      }
+    } catch {
+      // If user lookup fails, proceed with auth attempt
+    }
+
     if (!isGoogleDriveAuthConfigured()) {
-      return safeJsonResponse({
+      return buildSuccessResponse({
         connected: true,
         provider: "local",
-        message: "Local enterprise Drive fallback is active. Google credentials are not required.",
+        message: "Local enterprise Drive fallback is active.",
       });
     }
 
     const state = crypto.randomBytes(16).toString("hex");
     const authUrl = buildGoogleDriveAuthUrl(state);
-    const response = NextResponse.json({ authUrl });
+    const response = NextResponse.json({ success: true, authUrl });
     response.cookies.set(getCallbackStateCookieName(), state, {
       httpOnly: true,
       sameSite: "lax",
@@ -350,7 +463,7 @@ export async function POST(request: NextRequest) {
           timestamp: new Date().toISOString(),
           metadata: { fileId, source: metadata.mimeType, syncStatus: document.syncStatus },
         });
-        return safeJsonResponse(buildSafeDriveDocument(document));
+        return buildSuccessResponse(buildSafeDriveDocument(document));
       }
 
       const accessToken = await getValidAccessToken(account!);
@@ -443,7 +556,7 @@ export async function POST(request: NextRequest) {
       metadata: { fileId, source: metadata.mimeType, syncStatus: document.syncStatus },
     });
 
-    return safeJsonResponse(buildSafeDriveDocument(document));
+    return buildSuccessResponse(buildSafeDriveDocument(document));
   }
 
   if (action === "refresh") {
@@ -470,7 +583,7 @@ export async function POST(request: NextRequest) {
         updatedById: userId,
       });
       await startIngestionWorker();
-      return safeJsonResponse({ success: true, documentId: document.id, syncStatus: "synced" });
+      return buildSuccessResponse({ success: true, documentId: document.id, syncStatus: "synced" });
     }
 
     const account = await getCurrentDriveAccount(request);
@@ -499,7 +612,85 @@ export async function POST(request: NextRequest) {
         rawPayload,
       });
     }
-    return safeJsonResponse({ success: true, documentId: document.id, syncStatus: "synced" });
+    return buildSuccessResponse({ success: true, documentId: document.id, syncStatus: "synced" });
+  }
+
+  if (action === "sync") {
+    const userId = getUserIdFromRequest(request);
+    if (!userId) {
+      return buildErrorResponse("Unauthorized: missing session", 401);
+    }
+
+    // Check if user has permission to manage Drive
+    try {
+      const { getAllUsers } = require("@/services/api");
+      const users = getAllUsers?.() ?? [];
+      const user = users.find((u: any) => u.id === userId || u.auth_user_id === userId);
+      if (!user || !canManageDrive(user)) {
+        await saveActivity({
+          id: `activity-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          userId,
+          action: "SYSTEM_EVENT",
+          targetType: "system",
+          timestamp: new Date().toISOString(),
+          metadata: { reason: "insufficient_permissions", mode: body.mode },
+        });
+        return buildErrorResponse("Your role does not have permission to sync Drive documents", 403);
+      }
+    } catch {
+      // If user lookup fails, proceed with caution
+    }
+
+    const mode = (body.mode as "manual" | "incremental" | "full") || "manual";
+    const localMode = !isGoogleDriveAuthConfigured();
+    const account = localMode ? null : await getCurrentDriveAccount(request, body.accountId);
+    if (!localMode && !account) {
+      return buildErrorResponse("No connected Drive account found", 401);
+    }
+
+    if (mode === "manual") {
+      const document = body.documentId ? getDriveDocumentById(body.documentId) : undefined;
+      if (!document) {
+        return buildErrorResponse("Drive document not found for manual sync", 404);
+      }
+      const status = await resyncDriveDocument(document, userId, account, localMode);
+      await saveActivity({
+        id: `activity-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        userId,
+        action: "SYSTEM_EVENT",
+        targetType: "document",
+        targetId: document.id,
+        timestamp: new Date().toISOString(),
+        metadata: { mode, syncStatus: status },
+      });
+      return buildSuccessResponse({ success: true, mode, synced: 1, documents: [{ id: document.id, syncStatus: status }] });
+    }
+
+    const allDriveDocuments = getDriveDocuments();
+    const targets =
+      mode === "incremental" ? allDriveDocuments.filter(needsIncrementalSync) : allDriveDocuments;
+
+    const results: Array<{ id: string; syncStatus: string }> = [];
+    for (const document of targets) {
+      try {
+        const status = await resyncDriveDocument(document, userId, account, localMode);
+        results.push({ id: document.id, syncStatus: status });
+      } catch (error) {
+        updateDriveDocumentSyncMetadata(document.id, { syncStatus: "failed", lastSyncedAt: new Date().toISOString() });
+        results.push({ id: document.id, syncStatus: "failed" });
+      }
+    }
+
+    await saveActivity({
+      id: `activity-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      userId,
+      action: "SYSTEM_EVENT",
+      targetType: "system",
+      timestamp: new Date().toISOString(),
+      metadata: { event: "drive_sync", mode, count: String(results.length), successCount: String(results.filter(r => r.syncStatus === "synced").length) },
+    });
+
+    return buildSuccessResponse({ success: true, mode, synced: results.length, documents: results });
   }
 
   if (action === "register") {
@@ -518,16 +709,66 @@ export async function POST(request: NextRequest) {
     const accessToken = await getValidAccessToken(account);
     const channelId = `drive-webhook-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const subscription = await createDriveWatchSubscription(accessToken, fileId, channelId, buildWebhookCallbackUrl(), userId);
-    return safeJsonResponse({ success: true, subscription });
+    return buildSuccessResponse({ success: true, subscription });
   }
 
   if (action === "disconnect") {
+    const userId = getUserIdFromRequest(request);
+    if (!userId) {
+      return buildErrorResponse("Unauthorized: missing session", 401);
+    }
+
     const accountId = body.accountId;
     if (!accountId) {
       return buildErrorResponse("Missing accountId", 400);
     }
-    const disconnected = await deactivateDriveAccount(accountId);
-    return safeJsonResponse({ success: !!disconnected, accountId });
+
+    // Check if user has permission to manage Drive
+    try {
+      const { getAllUsers } = require("@/services/api");
+      const users = getAllUsers?.() ?? [];
+      const user = users.find((u: any) => u.id === userId || u.auth_user_id === userId);
+      if (!user || !canManageDrive(user)) {
+        await saveActivity({
+          id: `activity-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          userId,
+          action: "SYSTEM_EVENT",
+          targetType: "system",
+          targetId: accountId,
+          timestamp: new Date().toISOString(),
+          metadata: { reason: "insufficient_permissions" },
+        });
+        return buildErrorResponse("Your role does not have permission to manage Drive accounts", 403);
+      }
+    } catch {
+      // If user lookup fails, proceed with caution
+    }
+
+    try {
+      const disconnected = await deactivateDriveAccount(accountId);
+      await saveActivity({
+        id: `activity-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        userId,
+        action: "SYSTEM_EVENT",
+        targetType: "system",
+        targetId: accountId,
+        timestamp: new Date().toISOString(),
+        metadata: { event: "drive_account_disconnected", success: String(!!disconnected) },
+      });
+      return buildSuccessResponse({ success: !!disconnected, accountId });
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : "Disconnect failed";
+      await saveActivity({
+        id: `activity-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        userId,
+        action: "SYSTEM_EVENT",
+        targetType: "system",
+        targetId: accountId,
+        timestamp: new Date().toISOString(),
+        metadata: { error: errorMsg },
+      });
+      return buildErrorResponse(errorMsg, 500);
+    }
   }
 
   if (action === "webhook") {
@@ -543,7 +784,7 @@ export async function POST(request: NextRequest) {
     const match = resourceUri.match(/\/files\/([^/?]+)/);
     const fileId = match?.[1];
     if (!fileId) {
-      return safeJsonResponse({ success: true });
+      return buildSuccessResponse({ success: true });
     }
 
     try {
@@ -582,7 +823,7 @@ export async function POST(request: NextRequest) {
       return buildErrorResponse(`Webhook sync failed: ${String(error)}`, 500);
     }
 
-    return safeJsonResponse({ success: true, resourceId, channelId, resourceState });
+    return buildSuccessResponse({ success: true, resourceId, channelId, resourceState });
   }
 
   return buildErrorResponse(`Unsupported POST action: ${action}`, 404);
