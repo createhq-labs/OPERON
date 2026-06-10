@@ -1277,7 +1277,7 @@ export default function Page() {
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
                       <select value={newRoleId}       onChange={(e) => setNewRoleId(e.target.value as RoleId)}       style={S.select}>{creatableRoles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select>
                       <select value={newDepartmentId} onChange={(e) => setNewDepartmentId(e.target.value as DeptId)} style={S.select}>
-                        {getDepartmentFilters().filter((f) => f.id !== "all" && assignableDepartments.includes(f.id)).map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
+                        {getDepartmentFilters().filter((f) => f.id !== "all" && assignableDepartments.includes(f.id as DeptId)).map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
                       </select>
                     </div>
                     <select value={newSupervisorId} onChange={(e) => setNewSupervisorId(e.target.value)} style={S.select}>
