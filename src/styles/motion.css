@@ -1,0 +1,389 @@
+/**
+ * Operon Motion & Animation System
+ * Premium, smooth, effortless transitions inspired by Apple, Linear, Stripe
+ */
+
+/* ===========================================
+   PAGE TRANSITIONS
+   =========================================== */
+
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes page-exit {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+}
+
+.page-transition-enter {
+  animation: page-enter 250ms var(--ease-out) forwards;
+}
+
+.page-transition-exit {
+  animation: page-exit 250ms var(--ease-out) forwards;
+}
+
+/* ===========================================
+   FADE & SCALE
+   =========================================== */
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes scale-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+
+/* ===========================================
+   SLIDE ANIMATIONS
+   =========================================== */
+
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ===========================================
+   MODAL ANIMATIONS
+   =========================================== */
+
+@keyframes modal-backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes modal-content-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.modal-animation-enter {
+  animation: modal-backdrop-in 250ms var(--ease-out) forwards;
+}
+
+.modal-animation-enter .modal-panel {
+  animation: modal-content-in 350ms var(--ease-out) forwards;
+}
+
+/* ===========================================
+   STAGGER ANIMATIONS
+   =========================================== */
+
+@keyframes stagger-item {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.stagger-container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.stagger-item {
+  animation: stagger-item 400ms var(--ease-out) both;
+}
+
+.stagger-item:nth-child(1) {
+  animation-delay: 0ms;
+}
+
+.stagger-item:nth-child(2) {
+  animation-delay: 40ms;
+}
+
+.stagger-item:nth-child(3) {
+  animation-delay: 80ms;
+}
+
+.stagger-item:nth-child(4) {
+  animation-delay: 120ms;
+}
+
+.stagger-item:nth-child(5) {
+  animation-delay: 160ms;
+}
+
+.stagger-item:nth-child(n + 6) {
+  animation-delay: calc((var(--n) - 5) * 40ms);
+}
+
+/* ===========================================
+   LOADING ANIMATIONS
+   =========================================== */
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes bounce {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+.loading-spinner {
+  animation: rotate 1s linear infinite;
+}
+
+.loading-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* ===========================================
+   HOVER & INTERACTION
+   =========================================== */
+
+@keyframes hover-glow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(255, 255, 255, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+  }
+}
+
+.hover-glow:hover {
+  animation: hover-glow 600ms var(--ease-out);
+}
+
+/* ===========================================
+   SIDEBAR ANIMATIONS
+   =========================================== */
+
+@keyframes sidebar-nav-indicator {
+  from {
+    opacity: 0;
+    transform: scaleY(0);
+  }
+  to {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}
+
+.sidebar-nav-indicator {
+  animation: sidebar-nav-indicator 250ms var(--ease-standard) forwards;
+  transform-origin: top;
+}
+
+/* ===========================================
+   SEARCH PALETTE ANIMATIONS
+   =========================================== */
+
+@keyframes palette-backdrop-blur {
+  from {
+    backdrop-filter: blur(0px);
+  }
+  to {
+    backdrop-filter: var(--blur-md);
+  }
+}
+
+@keyframes palette-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.palette-animation-enter {
+  animation: palette-backdrop-blur 300ms var(--ease-out) forwards;
+}
+
+.palette-animation-enter .palette-panel {
+  animation: palette-scale-in 350ms var(--ease-out) forwards;
+}
+
+/* ===========================================
+   SUBTLE EFFECTS
+   =========================================== */
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+.float {
+  animation: float 3s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+.shimmer {
+  animation: shimmer 2s infinite;
+}
+
+/* ===========================================
+   TRANSITION UTILITIES
+   =========================================== */
+
+.transition-fast {
+  transition: all var(--duration-fast) var(--ease-standard);
+}
+
+.transition-normal {
+  transition: all var(--duration-normal) var(--ease-standard);
+}
+
+.transition-slow {
+  transition: all var(--duration-slow) var(--ease-standard);
+}
+
+.transition-color-fast {
+  transition: color var(--duration-fast) var(--ease-standard);
+}
+
+.transition-transform-fast {
+  transition: transform var(--duration-fast) var(--ease-standard);
+}
+
+.transition-opacity-fast {
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+
+/* ===========================================
+   SCROLL BEHAVIOR
+   =========================================== */
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* Smooth scroll with Lenis-like behavior */
+.scroll-smooth {
+  scroll-behavior: smooth;
+}
+
+.scroll-instant {
+  scroll-behavior: auto;
+}

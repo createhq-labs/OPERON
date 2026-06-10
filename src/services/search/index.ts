@@ -3,65 +3,40 @@ import type { SearchOptions } from "./types";
 import { buildDocumentIndex, buildDriveDocumentIndex, buildResourceIndex } from "./indexer";
 import { searchEntries } from "./engine";
 import { filterVisibleDocuments, filterVisibleDriveDocuments, filterVisibleResources } from "./permissions";
-import { buildCacheKey, getCachedSearchResults, setCachedSearchResults } from "./cache";
 import { markSearchIndexDirty } from "./sync";
 import { createFallbackQuery } from "./filters";
 
 export function searchDocuments(user: User, documents: Document[], query = "", departmentId?: DeptId | "all", page = 1, limit = 20, sort: SearchOptions["sort"] = "pinned") {
-  const cacheKey = buildCacheKey({ userId: user.id, roleId: user.roleId, query, departmentId, sort });
-  const cached = getCachedSearchResults<Document[]>(cacheKey);
-  if (cached) {
-    return cached;
-  }
-
   try {
     const visibleDocuments = filterVisibleDocuments(user, documents);
     const documentIndex = buildDocumentIndex(visibleDocuments);
     const results = searchEntries(documentIndex, query, { departmentId, sort });
-    const items = results.slice((page - 1) * limit, page * limit).map((item) => item.ref);
-    setCachedSearchResults(cacheKey, items);
-    return items;
+    return results.slice((page - 1) * limit, page * limit).map((item) => item.ref);
   } catch (error) {
     return fallbackDocumentSearch(user, documents, query, departmentId, page, limit, sort);
   }
 }
 
 export function searchDriveDocuments(user: User, documents: DriveDocumentReference[], query = "", departmentId?: DeptId | "all", page = 1, limit = 20, sort: SearchOptions["sort"] = "pinned") {
-  const cacheKey = buildCacheKey({ userId: user.id, roleId: user.roleId, query, departmentId, sort });
-  const cached = getCachedSearchResults<DriveDocumentReference[]>(cacheKey);
-  if (cached) {
-    return cached;
-  }
-
   try {
     const visibleDocuments = filterVisibleDriveDocuments(user, documents);
     const documentIndex = buildDriveDocumentIndex(visibleDocuments);
     const results = searchEntries(documentIndex, query, { departmentId, sort });
-    const items = results.slice((page - 1) * limit, page * limit).map((item) => item.ref);
-    setCachedSearchResults(cacheKey, items);
-    return items;
+    return results.slice((page - 1) * limit, page * limit).map((item) => item.ref);
   } catch (error) {
     return fallbackDriveDocumentSearch(user, documents, query, departmentId, page, limit, sort);
   }
 }
 
 export function searchResources(user: User, resources: ResourceItem[], query = "", category?: string, page = 1, limit = 20) {
-  const cacheKey = buildCacheKey({ userId: user.id, roleId: user.roleId, query, departmentId: undefined, sort: "relevance" });
-  const cached = getCachedSearchResults<ResourceItem[]>(cacheKey);
-  if (cached) {
-    return cached;
-  }
-
   try {
     const visibleResources = filterVisibleResources(user, resources);
     const resourceIndex = buildResourceIndex(visibleResources);
     const results = searchEntries(resourceIndex, query, { sort: "relevance" });
-    const candidates = results
+    return results
       .filter((item) => !category || item.ref.category === category)
       .slice((page - 1) * limit, page * limit)
       .map((item) => item.ref);
-    setCachedSearchResults(cacheKey, candidates);
-    return candidates;
   } catch (error) {
     return fallbackResourceSearch(user, resources, query, category, page, limit);
   }

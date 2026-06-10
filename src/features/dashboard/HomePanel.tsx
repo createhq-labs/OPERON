@@ -1,3 +1,4 @@
+import { motion } from "framer-motion";
 import type { Document, DriveDocumentReference, User } from "@/core/operon";
 import type { DriveDiagnostics } from "@/services/drive";
 
@@ -38,99 +39,263 @@ export function HomePanel({
     .slice(0, 8);
 
   return (
-    <div className="space-y-8">
-      <div className="rounded-[12px] border border-border bg-bg-secondary p-6">
-        <h1 className="text-2xl font-semibold text-content-primary">
-          Welcome back, {user.name.split(" ")[0]}
-        </h1>
-      </div>
-
-      <div className="grid gap-8 xl:grid-cols-[1fr_280px]">
-        <div className="space-y-8">
-          {displayQuickActions.length > 0 && (
-            <section className="rounded-[12px] border border-border bg-bg-secondary p-6">
-              <h2 className="text-sm font-semibold text-content-tertiary mb-4">Quick actions</h2>
-              <div className="grid gap-3 sm:grid-cols-2">
-                {displayQuickActions.slice(0, 4).map((action) => (
-                  <button
-                    key={`${action.label}-${action.id}`}
-                    type="button"
-                    onClick={() => onActionSelect(action.id)}
-                    className="rounded-[12px] border border-border/50 bg-bg-primary p-3 text-left text-sm font-medium text-content-primary hover:border-border transition"
-                  >
-                    {action.label}
-                  </button>
-                ))}
-              </div>
-            </section>
-          )}
-
-          <section className="rounded-[12px] border border-border bg-bg-secondary p-6">
-            <h2 className="text-sm font-semibold text-content-tertiary mb-4">Recent</h2>
-            <div className="space-y-2">
-              {recentDocs.length > 0 ? (
-                recentDocs.map((doc) => (
-                  <button
-                    key={doc.id}
-                    type="button"
-                    onClick={() => onShowDoc(doc.id)}
-                    className="w-full rounded-[12px] border border-border/50 bg-bg-primary p-3 text-left transition hover:border-border"
-                  >
-                    <div className="truncate font-medium text-content-primary text-sm">
-                      {doc.title}
-                    </div>
-                    <div className="mt-1 truncate text-xs text-content-tertiary">
-                      {TAG_LABELS[doc.tag]} • {new Date(doc.updatedAt).toLocaleDateString()}
-                    </div>
-                  </button>
-                ))
-              ) : providerLoading ? (
-                <div className="text-sm text-content-tertiary">Loading…</div>
-              ) : (
-                <div className="text-sm text-content-tertiary">No recent documents</div>
-              )}
-            </div>
-          </section>
-        </div>
-
-        <aside className="space-y-6">
-          <div className="rounded-[12px] border border-border bg-bg-secondary p-4">
-            <div className="text-xs font-medium uppercase text-content-tertiary">
-              Stats
-            </div>
-            <div className="mt-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-content-secondary">Documents</span>
-                <span className="font-semibold text-content-primary">{accessibleDocs.length}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-content-secondary">Pinned</span>
-                <span className="font-semibold text-content-primary">{pinnedDocs.length}</span>
-              </div>
-            </div>
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, ease: [0.44, 0, 0.56, 1] }}
+      style={{ display: "flex", flexDirection: "column", gap: "32px" }}
+    >
+      {/* Quick Actions */}
+      {displayQuickActions.length > 0 && (
+        <motion.section
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.05, ease: [0.44, 0, 0.56, 1] }}
+          style={{
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--r-lg)",
+            padding: "24px",
+          }}
+        >
+          <h2
+            style={{
+              fontFamily: "var(--font-ui)",
+              fontSize: "var(--text-12)",
+              fontWeight: 500,
+              color: "var(--text-3)",
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+              marginBottom: "16px",
+              margin: 0,
+            }}
+          >
+            Quick actions
+          </h2>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+              gap: "12px",
+            }}
+          >
+            {displayQuickActions.slice(0, 6).map((action, index) => (
+              <motion.button
+                key={`${action.label}-${action.id}`}
+                type="button"
+                onClick={() => onActionSelect(action.id)}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{
+                  duration: 0.25,
+                  delay: index * 0.03,
+                  ease: [0.44, 0, 0.56, 1],
+                }}
+                whileHover={{ y: -1 }}
+                whileTap={{ scale: 0.98 }}
+                style={{
+                  background: "var(--surface-2)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--r-md)",
+                  padding: "14px 16px",
+                  textAlign: "left",
+                  cursor: "pointer",
+                  transition: "all 200ms",
+                  fontSize: "var(--text-14)",
+                  fontWeight: 500,
+                  color: "var(--text)",
+                }}
+              >
+                {action.label}
+              </motion.button>
+            ))}
           </div>
+        </motion.section>
+      )}
 
-          {driveDiagnostics && (
-            <div className="rounded-[12px] border border-border bg-bg-secondary p-4">
-              <div className="text-xs font-medium uppercase text-content-tertiary">
-                Drive
-              </div>
-              <div className="mt-3 flex items-center gap-2">
+      {/* Recent Documents */}
+      <motion.section
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3, delay: 0.1, ease: [0.44, 0, 0.56, 1] }}
+        style={{
+          background: "var(--surface)",
+          border: "1px solid var(--border)",
+          borderRadius: "var(--r-lg)",
+          padding: "24px",
+        }}
+      >
+        <h2
+          style={{
+            fontFamily: "var(--font-ui)",
+            fontSize: "var(--text-12)",
+            fontWeight: 500,
+            color: "var(--text-3)",
+            letterSpacing: "0.06em",
+            textTransform: "uppercase",
+            marginBottom: "16px",
+            margin: 0,
+          }}
+        >
+          Recent
+        </h2>
+        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+          {recentDocs.length > 0 ? (
+            recentDocs.map((doc, index) => (
+              <motion.button
+                key={doc.id}
+                type="button"
+                onClick={() => onShowDoc(doc.id)}
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{
+                  duration: 0.25,
+                  delay: index * 0.02,
+                  ease: [0.44, 0, 0.56, 1],
+                }}
+                whileHover={{ x: 2 }}
+                whileTap={{ scale: 0.99 }}
+                style={{
+                  background: "var(--surface-2)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--r-md)",
+                  padding: "12px 14px",
+                  textAlign: "left",
+                  cursor: "pointer",
+                  transition: "all 200ms",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "12px",
+                }}
+              >
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div
+                    style={{
+                      fontFamily: "var(--font-ui)",
+                      fontSize: "var(--text-14)",
+                      fontWeight: 500,
+                      color: "var(--text)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {doc.title}
+                  </div>
+                </div>
                 <div
-                  className={`h-2 w-2 rounded-full ${
-                    driveDiagnostics.providerMode === "local"
-                      ? "bg-amber-500"
-                      : "bg-green-500"
-                  }`}
-                />
-                <span className="text-sm font-medium text-content-primary">
-                  {driveDiagnostics.providerMode === "local" ? "Local" : "Connected"}
-                </span>
-              </div>
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: "var(--text-11)",
+                    color: "var(--text-3)",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {TAG_LABELS[doc.tag]}
+                </div>
+              </motion.button>
+            ))
+          ) : providerLoading ? (
+            <motion.div
+              animate={{ opacity: [0.5, 1] }}
+              transition={{ duration: 0.8, repeat: Infinity }}
+              style={{
+                fontSize: "var(--text-14)",
+                color: "var(--text-3)",
+                padding: "16px",
+                textAlign: "center",
+              }}
+            >
+              Loading…
+            </motion.div>
+          ) : (
+            <div
+              style={{
+                fontSize: "var(--text-14)",
+                color: "var(--text-3)",
+                padding: "16px",
+                textAlign: "center",
+              }}
+            >
+              No documents yet
             </div>
           )}
-        </aside>
-      </div>
-    </div>
+        </div>
+      </motion.section>
+
+      {/* Stats */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3, delay: 0.15, ease: [0.44, 0, 0.56, 1] }}
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+          gap: "12px",
+        }}
+      >
+        <div
+          style={{
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--r-lg)",
+            padding: "16px",
+            textAlign: "center",
+          }}
+        >
+          <div
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: "24px",
+              fontWeight: 400,
+              color: "var(--text)",
+              marginBottom: "4px",
+            }}
+          >
+            {accessibleDocs.length}
+          </div>
+          <div
+            style={{
+              fontFamily: "var(--font-body)",
+              fontSize: "var(--text-12)",
+              color: "var(--text-3)",
+            }}
+          >
+            Documents
+          </div>
+        </div>
+        <div
+          style={{
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--r-lg)",
+            padding: "16px",
+            textAlign: "center",
+          }}
+        >
+          <div
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: "24px",
+              fontWeight: 400,
+              color: "var(--text)",
+              marginBottom: "4px",
+            }}
+          >
+            {pinnedDocs.length}
+          </div>
+          <div
+            style={{
+              fontFamily: "var(--font-body)",
+              fontSize: "var(--text-12)",
+              color: "var(--text-3)",
+            }}
+          >
+            Pinned
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
   );
 }

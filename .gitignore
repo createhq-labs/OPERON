@@ -1,10 +1,39 @@
+# Dependencies
 node_modules/
+
+# Next.js build output
 .next/
-.env.local
-.env
-dist/
 out/
-coverage/
-.vercel/
+dist/
+
+# Environment files — never commit these
+.env
+.env.local
+.env.staging
+.env.production
+.env.*.local
+
+# Service account key files — never commit these
+*.json.key
+service-account*.json
+*-service-account.json
+
+# TypeScript
 *.tsbuildinfo
 
+# Vercel
+.vercel/
+
+# Testing
+coverage/
+.nyc_output/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/settings.json
+.idea/
+*.swp
+*.swo

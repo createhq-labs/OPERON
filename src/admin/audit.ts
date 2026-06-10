@@ -1,22 +1,29 @@
-import type { ActivityEvent, User } from "@/core/operon";
-
-export function logAdminAction(user: User, description: string): ActivityEvent {
+import crypto from "crypto";
+import type { Role, ActivityEvent, User } from "@/core/operon";
+ 
+export function getPermissionSummary(
+  roles: Role[]
+): Array<{ roleId: string; roleName: string; permissions: Role["permissions"] }> {
+  return roles.map((role) => ({
+    roleId: role.id,
+    roleName: role.name,
+    permissions: role.permissions,
+  }));
+}
+ 
+/**
+ * Creates a structured admin audit event.
+ */
+export function logAdminAction(actor: User | null, description: string): ActivityEvent {
   return {
     id: `activity_${crypto.randomUUID()}`,
-    userId: user.id,
+    userId: actor?.id ?? "system",
     action: "SYSTEM_EVENT",
     targetType: "system",
+    targetId: "admin",
     timestamp: new Date().toISOString(),
     metadata: {
       description,
-      actor: user.name,
     },
   };
-}
-
-export function filterAdminEvents(events: ActivityEvent[], user: User): ActivityEvent[] {
-  if (user.roleId === "role_admin" || user.roleId === "role_cofounder") {
-    return events;
-  }
-  return events.filter((event) => event.userId === user.id);
 }

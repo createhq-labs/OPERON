@@ -1,20 +1,26 @@
 import type { NormalizedDocumentSource } from "@/providers/types";
-import { authorizeGoogleDriveProvider } from "./auth";
 import { hydrateGoogleDriveMetadata } from "./metadata";
-import { handleGoogleDriveWebhook } from "./webhook";
-import { syncGoogleDriveDocument } from "./sync";
 
-export async function fetchGoogleDriveSource(documentId: string): Promise<NormalizedDocumentSource> {
-  return {
-    id: documentId,
-    provider: "googleDrive",
-    sourceType: "google_drive",
-    title: `Drive document ${documentId}`,
-    description: "Google Drive document metadata is available for preview and status tracking.",
-    rawUrl: `https://docs.google.com/document/d/${documentId}/edit`,
-    mimeType: "application/vnd.google-apps.document",
-    createdAt: new Date().toISOString(),
-  };
+export async function fetchGoogleDriveSource(documentId: string, accessToken: string): Promise<NormalizedDocumentSource> {
+  return hydrateGoogleDriveMetadata(documentId, accessToken);
 }
 
-export { authorizeGoogleDriveProvider, hydrateGoogleDriveMetadata, handleGoogleDriveWebhook, syncGoogleDriveDocument };
+export { authorizeGoogleDriveProvider } from "./auth";
+export type { GoogleDriveAuthResult } from "./auth";
+
+export { hydrateGoogleDriveMetadata } from "./metadata";
+
+export { reconcileDriveDocument } from "./reconciliation";
+export type { ReconciliationResult, RemoteDriveFileState } from "./reconciliation";
+
+export { createSyncSchedule, advanceSyncSchedule, isSyncScheduleDue } from "./scheduler";
+export type { SyncSchedule } from "./scheduler";
+
+export { syncGoogleDriveDocument } from "./sync";
+export type { SyncResult } from "./sync";
+
+export { handleGoogleDriveWebhook } from "./webhook";
+export type { GoogleDriveWebhookEvent, GoogleDriveWebhookEventType, WebhookHandlerResult } from "./webhook";
+
+export { registerDriveWebhookChannel, stopDriveWebhookChannel } from "./webhooks";
+export type { GoogleDriveWebhookRegistration, GoogleDriveWebhookRegistrationOptions } from "./webhooks";

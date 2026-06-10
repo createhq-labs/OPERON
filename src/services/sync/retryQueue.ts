@@ -10,22 +10,11 @@ type RetryRecord = {
 };
 
 function readQueue(): RetryRecord[] {
-  try {
-    const raw = typeof window === "undefined" ? null : window.localStorage.getItem(RETRY_QUEUE_KEY);
-    if (!raw) {
-      return [];
-    }
-    return JSON.parse(raw) as RetryRecord[];
-  } catch {
-    return [];
-  }
+  return [];
 }
 
 function writeQueue(records: RetryRecord[]) {
-  if (typeof window === "undefined") {
-    return;
-  }
-  window.localStorage.setItem(RETRY_QUEUE_KEY, JSON.stringify(records));
+  // In production, retry queue persistence is disabled and uploads must be handled through Supabase.
 }
 
 export function enqueueRetryUpload(payload: PendingUploadCacheItem) {

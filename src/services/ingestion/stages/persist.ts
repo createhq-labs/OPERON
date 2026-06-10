@@ -1,6 +1,10 @@
 import type { IngestionJob, IngestionResult } from "../types";
 import type { EnrichedDocument } from "./enrich";
-import { saveDocument, saveIngestionJob, saveIngestionResult } from "@/services/api";
+import { saveDocument, saveDriveDocumentReference, saveIngestionJob, saveIngestionResult } from "@/services/api";
+
+function isDriveDocument(document: any): boolean {
+  return Boolean(document && (document.driveFileId || document.source === "google_drive" || document.source === "local_drive"));
+}
 
 export async function persistIngestionResult(job: IngestionJob, document: any, enriched: EnrichedDocument): Promise<IngestionResult> {
   const now = new Date().toISOString();
@@ -17,7 +21,11 @@ export async function persistIngestionResult(job: IngestionJob, document: any, e
   document.ingestionStatus = "completed";
   document.updatedAt = now;
 
-  saveDocument(document);
+  if (isDriveDocument(document)) {
+    saveDriveDocumentReference(document);
+  } else {
+    saveDocument(document);
+  }
   saveIngestionJob({ ...job, status: "completed", completedAt: now, updatedAt: now, progress: 100 });
 
   const result: IngestionResult = {

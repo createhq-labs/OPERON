@@ -1,4 +1,11 @@
-import type { DriveDocumentReference, DeptId, DocTag, RoleId, UserType, VisibilityScope } from "@/core/operon";
+import type {
+  DriveDocumentReference,
+  DeptId,
+  DocTag,
+  RoleId,
+  UserType,
+  VisibilityScope,
+} from "@/core/operon";
 
 export interface DriveAttachPayload {
   title: string;
@@ -25,6 +32,7 @@ export interface DriveAttachPayload {
 export interface DriveConnectResult {
   connected: boolean;
   message: string;
+  authUrl?: string;
 }
 
 export interface DriveProvider {

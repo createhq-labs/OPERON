@@ -1,41 +1,57 @@
 import type { ActivityEvent, Role, User } from "@/core/operon";
-import { recordActivity } from "@/core/operon";
 import { logAdminAction } from "@/admin/audit";
-import { saveRole, deleteRole } from "@/services/api";
-import { requireAuthenticatedUser, requireRoleManagementPermission } from "@/security/accessControl";
+import { saveRole, deleteRole, saveActivity } from "@/services/api";
+import { createActivityEvent } from "@/services/activity";
+import {
+  requireRoleManagementPermission,
+} from "@/security/accessControl";
 
-export function saveRoleWithAudit(actor: User, role: Role) {
-  requireAuthenticatedUser(actor);
+/**
+ * Saves a role and records an audit event.
+ * Requires the actor to have role management permission.
+ * Accepts User | null — the permission guard handles the null case
+ * with a clear error message.
+ */
+export function saveRoleWithAudit(actor: User | null, role: Role): Role {
   requireRoleManagementPermission(actor);
 
   const saved = saveRole(role);
 
-  recordActivity({
+  saveActivity(createActivityEvent({
     userId: actor.id,
     action: "ROLE_ASSIGNED",
     targetType: "user",
     targetId: role.id,
-    metadata: { role: role.name },
-  });
+    metadata: { roleName: role.name },
+  }));
 
   return saved;
 }
 
-export function deleteRoleWithAudit(actor: User, roleId: string) {
-  requireAuthenticatedUser(actor);
+/**
+ * Deletes a role and records an audit event.
+ * Returns true if the role was found and removed, false if it didn't exist.
+ */
+export function deleteRoleWithAudit(actor: User | null, roleId: string): boolean {
   requireRoleManagementPermission(actor);
 
   const removed = deleteRole(roleId);
 
   if (removed) {
-    recordActivity(logAdminAction(actor, `Deleted role ${roleId}`));
+    saveActivity(logAdminAction(actor, `Deleted role: ${roleId}`));
   }
 
   return removed;
 }
 
-export function createAdminAuditEvent(actor: User, description: string): ActivityEvent {
-  requireAuthenticatedUser(actor);
+/**
+ * Creates an admin audit event.
+ * Requires the actor to have role management permission.
+ */
+export function createAdminAuditEvent(
+  actor: User | null,
+  description: string
+): ActivityEvent {
   requireRoleManagementPermission(actor);
   return logAdminAction(actor, description);
 }

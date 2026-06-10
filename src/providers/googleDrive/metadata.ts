@@ -1,15 +1,24 @@
 import type { NormalizedDocumentSource } from "@/providers/types";
+import { getGoogleDriveClient } from "@/services/googleDriveClient";
 
-export async function hydrateGoogleDriveMetadata(documentId: string): Promise<NormalizedDocumentSource> {
+export async function hydrateGoogleDriveMetadata(documentId: string, accessToken: string): Promise<NormalizedDocumentSource> {
+  const client = getGoogleDriveClient(accessToken);
+  const file = await client.files.get({
+    fileId: documentId,
+    fields: "id,name,description,mimeType,createdTime,modifiedTime,webViewLink,size,owners",
+  });
+
+  const { id, name, description, mimeType, createdTime, modifiedTime, webViewLink } = file.data;
+
   return {
-    id: documentId,
+    id: (id as string | undefined) ?? documentId,
     provider: "googleDrive",
     sourceType: "google_drive",
-    title: `Google Drive document ${documentId}`,
-    description: `Hydrated metadata for Google Drive document ${documentId}.`,
-    rawUrl: `https://docs.google.com/document/d/${documentId}/edit`,
-    mimeType: "application/vnd.google-apps.document",
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    title: (name as string | undefined) ?? "Untitled",
+    description: (description as string | undefined) ?? "",
+    rawUrl: (webViewLink as string | undefined) ?? `https://drive.google.com/file/d/${documentId}/view`,
+    mimeType: (mimeType as string | undefined) ?? "application/octet-stream",
+    createdAt: (createdTime as string | undefined) ?? new Date().toISOString(),
+    updatedAt: (modifiedTime as string | undefined) ?? new Date().toISOString(),
   };
 }

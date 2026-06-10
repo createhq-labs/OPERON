@@ -1,0 +1,17 @@
+/* =============================================================================
+   EMBER — shell only.
+   The gradient is rendered by EmberOrb.tsx (canvas + cursor spring physics).
+   This file only defines the stacking context.
+   =========================================================================== */
+
+.ember-content {
+  position: relative;
+  z-index:  1;
+}
+
+/* Reduced motion — canvas component respects this via matchMedia too */
+@media (prefers-reduced-motion: reduce) {
+  canvas[aria-hidden="true"] {
+    display: none;
+  }
+}

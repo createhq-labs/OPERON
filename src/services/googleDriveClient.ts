@@ -53,6 +53,7 @@ export interface GoogleDriveFileMetadata {
   mimeType: string;
   webViewLink?: string;
   modifiedTime?: string;
+  createdTime?: string;
   owners?: Array<{ emailAddress?: string }>;
   permissions?: DriveDocumentPermission[];
   parents?: string[];
@@ -220,6 +221,7 @@ export async function fetchDriveFileMetadata(accessToken: string, fileId: string
     "mimeType",
     "webViewLink",
     "modifiedTime",
+    "createdTime",
     "permissions",
     "parents",
     "description",
@@ -302,7 +304,13 @@ export function chooseExportMimeType(mimeType: string) {
   return "";
 }
 
-export function mapGooglePermissions(permissions?: any[]): DriveDocumentPermission[] {
+interface GooglePermissionEntry {
+  role?: string;
+  emailAddress?: string;
+  domain?: string;
+}
+
+export function mapGooglePermissions(permissions?: GooglePermissionEntry[]): DriveDocumentPermission[] {
   if (!Array.isArray(permissions)) return [];
   return permissions.map((permission) => ({
     role: permission.role || "reader",
@@ -318,7 +326,7 @@ export async function getDriveFolderChildren(accessToken: string, folderId: stri
     const q = `\'${folderId}' in parents and trashed = false`;
     const endpoint = new URL("https://www.googleapis.com/drive/v3/files");
     endpoint.searchParams.set("q", q);
-    endpoint.searchParams.set("fields", "nextPageToken,files(id,name,mimeType,webViewLink,modifiedTime,owners,permissions,parents,description)");
+    endpoint.searchParams.set("fields", "nextPageToken,files(id,name,mimeType,webViewLink,modifiedTime,createdTime,owners,permissions,parents,description)");
     endpoint.searchParams.set("pageSize", "100");
     if (pageToken) endpoint.searchParams.set("pageToken", pageToken);
 
@@ -346,7 +354,8 @@ export async function createDriveWatchSubscription(
   fileId: string,
   channelId: string,
   callbackUrl: string,
-  token: string
+  token: string,
+  expiration?: number
 ) {
   const response = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}/watch`, {
     method: "POST",
@@ -359,6 +368,7 @@ export async function createDriveWatchSubscription(
       type: "web_hook",
       address: callbackUrl,
       token,
+      ...(expiration !== undefined ? { expiration: String(expiration) } : {}),
     }),
   });
 
@@ -376,12 +386,12 @@ export function buildDriveAccountPayload(account: {
   email: string;
   displayName: string;
   tokens: GoogleOAuthTokens;
-}) {
+}, existingId?: string, existingLegacyId?: string) {
   const now = new Date().toISOString();
   const expiresAt = new Date(Date.now() + account.tokens.expiresIn * 1000).toISOString();
   return {
-    id: `drive-account-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    legacy_id: `drive-account-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    id: existingId ?? `drive-account-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    legacy_id: existingLegacyId ?? `drive-account-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     user_legacy_id: account.userId,
     google_account_id: account.googleAccountId,
     email: account.email,
@@ -396,9 +406,48 @@ export function buildDriveAccountPayload(account: {
   };
 }
 
+/**
+ * Maps a database row (snake_case) to the GoogleDriveAccount interface (camelCase).
+ */
+function mapSupabaseToDriveAccount(row: any): GoogleDriveAccount {
+  return {
+    id: row.id,
+    legacyId: row.legacy_id,
+    userId: row.user_legacy_id,
+    googleAccountId: row.google_account_id,
+    email: row.email,
+    displayName: row.display_name,
+    accessTokenEncrypted: row.access_token_encrypted,
+    refreshTokenEncrypted: row.refresh_token_encrypted,
+    expiresAt: row.expires_at,
+    scopes: row.scopes || [],
+    active: row.active,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function createUpsertPayload(account: any) {
+  return { ...account, legacy_id: account.id };
+}
+
 export async function saveDriveAccount(account: GoogleDriveAccount) {
   if (!supabaseAdmin) return account;
-  const result = await supabaseAdmin.from("drive_accounts").upsert(account, { onConflict: "legacy_id" });
+  const payload = buildDriveAccountPayload({
+    userId: account.userId,
+    googleAccountId: account.googleAccountId,
+    email: account.email,
+    displayName: account.displayName,
+    tokens: {
+      accessToken: decryptValue(account.accessTokenEncrypted),
+      refreshToken: account.refreshTokenEncrypted ? decryptValue(account.refreshTokenEncrypted) : undefined,
+      expiresIn: account.expiresAt ? Math.floor((new Date(account.expiresAt).getTime() - Date.now()) / 1000) : 3600,
+      scope: account.scopes.join(" "),
+      tokenType: "Bearer"
+    }
+  }, account.id, account.legacyId);
+  
+  const result = await supabaseAdmin.from("drive_accounts").upsert(payload, { onConflict: "legacy_id" });
   if (result.error) {
     throw new Error(`Failed to save drive account: ${result.error.message}`);
   }
@@ -411,7 +460,7 @@ export async function findDriveAccounts(userId: string) {
   if (error) {
     throw new Error(error.message);
   }
-  return (data ?? []) as GoogleDriveAccount[];
+  return (data ?? []).map(mapSupabaseToDriveAccount);
 }
 
 export async function findDriveAccountById(accountId: string) {
@@ -420,7 +469,8 @@ export async function findDriveAccountById(accountId: string) {
   if (error) {
     throw new Error(error.message);
   }
-  return (data ?? null) as GoogleDriveAccount | null;
+  if (!data) return null;
+  return mapSupabaseToDriveAccount(data);
 }
 
 export async function deactivateDriveAccount(accountId: string) {
@@ -434,7 +484,7 @@ export async function deactivateDriveAccount(accountId: string) {
   if (error) {
     throw new Error(error.message);
   }
-  return data as GoogleDriveAccount;
+  return mapSupabaseToDriveAccount(data);
 }
 
 export async function getValidAccessToken(account: GoogleDriveAccount) {
@@ -480,4 +530,143 @@ export function getCallbackStateCookieName() {
 
 export function getDriveWebhookChannelToken(userId: string) {
   return `drive-${userId}-${crypto.randomBytes(8).toString("hex")}`;
+}
+
+// ─── Google API Client Adapter ───────────────────────────────────────────────
+//
+// Lightweight adapter that exposes a subset of the Google Drive REST API using
+// the same interface shape as the `googleapis` npm package. This allows
+// providers that were written against the googleapis SDK to call through this
+// module without importing the full SDK (which would bloat the server bundle).
+//
+// Supported surface:
+//   client.files.get(params)           → GET /drive/v3/files/:fileId
+//   client.files.watch(params)         → POST /drive/v3/files/:fileId/watch
+//   client.channels.stop(params)       → POST /drive/v3/channels/stop
+//
+// Access tokens are resolved lazily via supabaseAdmin on the first call that
+// requires authentication.  The client is stateless — re-create as needed.
+
+interface ApiResponse<T> {
+  data: T;
+  status: number;
+}
+
+interface FilesGetParams {
+  fileId: string;
+  fields?: string;
+}
+
+interface FilesWatchParams {
+  fileId: string;
+  requestBody: {
+    id: string;
+    type: string;
+    address: string;
+    expiration?: string;
+    token?: string;
+  };
+}
+
+interface ChannelsStopParams {
+  requestBody: {
+    id: string;
+    resourceId: string;
+  };
+}
+
+export interface GoogleDriveClientAdapter {
+  files: {
+    get(params: FilesGetParams): Promise<ApiResponse<Record<string, unknown>>>;
+    watch(params: FilesWatchParams): Promise<ApiResponse<{
+      id?: string;
+      resourceId?: string;
+      expiration?: string;
+    }>>;
+  };
+  channels: {
+    stop(params: ChannelsStopParams): Promise<ApiResponse<void>>;
+  };
+}
+
+/**
+ * Returns a lightweight Google Drive REST client adapter.
+ *
+ * This adapter requires a valid access token to be supplied via the
+ * `accessToken` parameter before calling any authenticated methods.
+ * If `accessToken` is omitted, individual method calls will throw unless
+ * the operation does not require authentication.
+ *
+ * Usage:
+ *   const client = getGoogleDriveClient(accessToken);
+ *   const file = await client.files.get({ fileId, fields: "id,name" });
+ */
+export function getGoogleDriveClient(accessToken?: string): GoogleDriveClientAdapter {
+  function requireToken(): string {
+    if (!accessToken) {
+      throw new Error(
+        "getGoogleDriveClient: accessToken is required for authenticated API calls. " +
+        "Retrieve a valid token via getValidAccessToken() and pass it to getGoogleDriveClient()."
+      );
+    }
+    return accessToken;
+  }
+
+  return {
+    files: {
+      async get(params: FilesGetParams): Promise<ApiResponse<Record<string, unknown>>> {
+        const token = requireToken();
+        const fieldsParam = params.fields ? `?fields=${encodeURIComponent(params.fields)}` : "";
+        const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(params.fileId)}${fieldsParam}`;
+        const response = await fetch(url, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!response.ok) {
+          const detail = await response.text().catch(() => response.statusText);
+          throw new Error(`Drive files.get failed (${response.status}): ${detail}`);
+        }
+        const data = (await response.json()) as Record<string, unknown>;
+        return { data, status: response.status };
+      },
+
+      async watch(params: FilesWatchParams): Promise<ApiResponse<{ id?: string; resourceId?: string; expiration?: string }>> {
+        const token = requireToken();
+        const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(params.fileId)}/watch`;
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(params.requestBody),
+        });
+        if (!response.ok) {
+          const detail = await response.text().catch(() => response.statusText);
+          throw new Error(`Drive files.watch failed (${response.status}): ${detail}`);
+        }
+        const data = (await response.json()) as { id?: string; resourceId?: string; expiration?: string };
+        return { data, status: response.status };
+      },
+    },
+
+    channels: {
+      async stop(params: ChannelsStopParams): Promise<ApiResponse<void>> {
+        const token = requireToken();
+        const url = "https://www.googleapis.com/drive/v3/channels/stop";
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(params.requestBody),
+        });
+        if (!response.ok) {
+          const detail = await response.text().catch(() => response.statusText);
+          throw new Error(`Drive channels.stop failed (${response.status}): ${detail}`);
+        }
+        return { data: undefined, status: response.status };
+      },
+    },
+  };
 }

@@ -1,10 +1,35 @@
-export function renderHeading(block: { type: string; content: string; id?: string }, index: number) {
+import type { HeadingBlock } from "@/renderers/types";
+
+export function renderHeading(block: HeadingBlock, _index: number) {
+  const isH2 = block.type === "heading";
+
   return (
-    <div key={block.id ?? `${block.type}-${index}`} className="mt-8 scroll-mt-20">
-      {block.type === "heading" ? (
-        <h2 className="text-2xl font-semibold text-content-primary">{block.content}</h2>
+    <div style={{ marginTop: "32px", scrollMarginTop: "80px" }}>
+      {isH2 ? (
+        <h2
+          style={{
+            fontFamily: "var(--font-display)",
+            fontSize: "var(--text-20)",
+            fontWeight: 600,
+            color: "var(--text)",
+            margin: 0,
+            letterSpacing: "-0.01em",
+          }}
+        >
+          {block.content}
+        </h2>
       ) : (
-        <h3 className="text-xl font-semibold text-content-primary">{block.content}</h3>
+        <h3
+          style={{
+            fontFamily: "var(--font-display)",
+            fontSize: "var(--text-16)",
+            fontWeight: 600,
+            color: "var(--text)",
+            margin: 0,
+          }}
+        >
+          {block.content}
+        </h3>
       )}
     </div>
   );

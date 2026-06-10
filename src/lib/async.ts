@@ -1,6 +1,11 @@
-export function withTimeout<T>(promise: PromiseLike<T>, timeoutMs: number, fallback: T): Promise<T> {
+export function withTimeout<T>(
+  promise: PromiseLike<T>,
+  timeoutMs: number,
+  fallback: T
+): Promise<T> {
   return new Promise<T>((resolve) => {
     let settled = false;
+
     const timeout = setTimeout(() => {
       if (!settled) {
         settled = true;

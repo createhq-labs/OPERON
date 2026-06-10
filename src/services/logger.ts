@@ -1,17 +1,19 @@
-export function logError(message: string, metadata?: Record<string, unknown>) {
-  if (typeof window !== "undefined") {
-    console.error("[Operon Error]", message, metadata ?? "");
-  }
+import { logRuntimeError, logRuntimeEvent, logRuntimeWarning } from "@/services/observability/runtimeLogger";
+
+/**
+ * Structured application logger.
+ * All output is routed through the observability layer — not console directly.
+ * Safe to call on both server and client.
+ */
+
+export function logError(message: string, metadata?: Record<string, unknown>): void {
+  logRuntimeError(message, metadata ?? {});
 }
 
-export function logInfo(message: string, metadata?: Record<string, unknown>) {
-  if (typeof window !== "undefined") {
-    console.info("[Operon]", message, metadata ?? "");
-  }
+export function logInfo(message: string, metadata?: Record<string, unknown>): void {
+  logRuntimeEvent(message, metadata ?? {});
 }
 
-export function logDebug(message: string, metadata?: Record<string, unknown>) {
-  if (typeof window !== "undefined") {
-    console.debug("[Operon Debug]", message, metadata ?? "");
-  }
+export function logWarning(message: string, metadata?: Record<string, unknown>): void {
+  logRuntimeWarning(message, metadata ?? {});
 }

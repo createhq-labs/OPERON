@@ -18,12 +18,13 @@ import type {
   UserType,
   VideoItem,
 } from "@/core/operon";
+import { ROLE_IDS } from "@/core/roles";
 import { getSupabaseDiagnostics, supabase, isSupabaseConfigured as isSupabaseConfiguredLib } from "@/lib/supabase";
 import { withTimeout } from "@/lib/async";
 import { uploadFileToStorage } from "@/services/storage";
 import { invalidateSearchIndex } from "@/services/search";
 import { logDiagnostic } from "./observability/diagnostics";
-import { safeReadFallbackCache, safeWriteFallbackCache, type CachedSessionPayload, type PendingUploadCacheItem } from "@/services/cache";
+import { type PendingUploadCacheItem } from "@/services/cache";
 import { enqueueRetryUpload } from "@/services/sync/retryQueue";
 import type { IngestionJob, IngestionResult, IngestionFailure } from "@/services/ingestion/types";
 
@@ -44,17 +45,16 @@ export interface ProviderHealth {
 }
 
 const configuredForSupabase = isSupabaseConfiguredLib();
+const productionEnforceSupabase = process.env.NODE_ENV === "production";
 const DATA_HYDRATION_TIMEOUT_MS = 4000;
-let dataProviderMode: DataProviderMode = configuredForSupabase ? "supabase" : "local";
+let dataProviderMode: DataProviderMode = configuredForSupabase ? "supabase" : productionEnforceSupabase ? "supabase" : "local";
 let supabaseAvailable = false;
-let cacheLoaded = false;
 let cacheAvailable = false;
-let cacheLastUpdatedAt = "";
 const pendingUploadStore: PendingUploadCacheItem[] = [];
 
 if (!configuredForSupabase) {
   console.warn(
-    "Supabase environment variables are missing or invalid. Falling back to local provider mode. This is a non-blocking fallback."
+    "Supabase environment variables are missing or invalid. Local provider fallback is disabled in production; the app will remain offline until Supabase is configured."
   );
 }
 
@@ -75,15 +75,27 @@ export function getDataProviderMode() {
 }
 
 export function getEffectiveDataProviderMode() {
-  return isSupabaseAvailable() ? "supabase" : "local";
+  return dataProviderMode;
 }
 
 export function setDataProviderMode(mode: DataProviderMode) {
+  if (mode === "local" && productionEnforceSupabase) {
+    console.warn("Local provider mode is disabled in production. Supabase mode remains active.");
+    return;
+  }
+
   if (mode === "supabase" && !isSupabaseConfigured()) {
-    console.warn(
-      "Supabase provider mode requested but Supabase is not configured. Staying in local provider mode."
-    );
-    dataProviderMode = "local";
+    if (!productionEnforceSupabase) {
+      console.warn(
+        "Supabase provider mode requested but Supabase is not configured. Staying in local provider mode."
+      );
+      dataProviderMode = "local";
+    } else {
+      console.warn(
+        "Supabase provider mode requested but Supabase is not configured. Running in supabase offline mode with no local fallback."
+      );
+      dataProviderMode = "supabase";
+    }
     return;
   }
 
@@ -93,8 +105,8 @@ export function setDataProviderMode(mode: DataProviderMode) {
   }
 }
 
-function mapSupabaseRow<T>(row: Record<string, any>): T {
-  const mapped: Record<string, any> = {};
+function mapSupabaseRow<T>(row: Record<string, unknown>): T {
+  const mapped: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(row)) {
     let normalizedKey: string;
@@ -104,9 +116,9 @@ function mapSupabaseRow<T>(row: Record<string, any>): T {
     } else if (key.endsWith("_legacy_id")) {
       normalizedKey = key
         .slice(0, -"_legacy_id".length)
-        .replace(/_([a-z])/g, (_, char) => char.toUpperCase()) + "Id";
+        .replace(/_([a-z])/g, (_, char: string) => char.toUpperCase()) + "Id";
     } else {
-      normalizedKey = key.replace(/_([a-z])/g, (_, char) => char.toUpperCase());
+      normalizedKey = key.replace(/_([a-z])/g, (_, char: string) => char.toUpperCase());
     }
 
     mapped[normalizedKey] = value;
@@ -115,7 +127,7 @@ function mapSupabaseRow<T>(row: Record<string, any>): T {
   return mapped as T;
 }
 
-function mapSupabaseRows<T>(rows: Record<string, any>[]) {
+function mapSupabaseRows<T>(rows: Record<string, unknown>[]) {
   return rows.map(mapSupabaseRow) as T[];
 }
 
@@ -130,23 +142,25 @@ function handleSupabaseError(error: unknown) {
   supabaseAvailable = false;
 }
 
-function safeSupabaseWrite(operation: () => any) {
+function safeSupabaseWrite(operation: () => unknown) {
   const result = operation();
   void Promise.resolve(result)
-    .then((resultValue: any) => {
-      if (resultValue?.error) {
-        handleSupabaseError(resultValue.error);
+    .then((resultValue: unknown) => {
+      if (resultValue !== null && typeof resultValue === "object" && "error" in resultValue && (resultValue as { error: unknown }).error) {
+        handleSupabaseError((resultValue as { error: unknown }).error);
       }
     })
     .catch(handleSupabaseError);
 }
 
-async function safeFetchSupabaseTable<T>(table: string) {
+async function safeFetchSupabaseTable(table: string) {
+  type FetchResult = { data: Record<string, unknown>[] | null; error: { message: string } | null };
+  const fallback: FetchResult = { data: [], error: { message: "Supabase table fetch timed out." } };
   try {
     const result = await withTimeout(
-      supabase.from(table).select("*").limit(1000),
+      supabase.from(table).select("*").limit(1000) as unknown as Promise<FetchResult>,
       DATA_HYDRATION_TIMEOUT_MS,
-      { data: [], error: { message: "Supabase table fetch timed out." } } as any
+      fallback
     );
 
     if (result.error || !Array.isArray(result.data)) {
@@ -155,7 +169,7 @@ async function safeFetchSupabaseTable<T>(table: string) {
       }
       return null;
     }
-    return result.data as Record<string, any>[];
+    return result.data;
   } catch (error) {
     console.warn(`Supabase optional table fetch failed for '${table}'`, error);
     return null;
@@ -172,10 +186,12 @@ async function checkSupabaseConnectivity() {
   }
 
   try {
+    type ConnResult = { data: { id: string }[] | null; error: { message: string } | null };
+    const connFallback: ConnResult = { data: [], error: { message: "Supabase connectivity check timed out." } };
     const result = await withTimeout(
-      supabase.from("roles").select("id").limit(1),
+      supabase.from("roles").select("id").limit(1) as unknown as Promise<ConnResult>,
       DATA_HYDRATION_TIMEOUT_MS,
-      { data: [], error: { message: "Supabase connectivity check timed out." } } as any
+      connFallback
     );
     return !result.error;
   } catch (error) {
@@ -225,113 +241,20 @@ function mergeEntitiesById<T extends { id: string }>(...collections: T[][]) {
   return Array.from(merged.values());
 }
 
-function loadCachedFallbackData() {
-  if (cacheLoaded) {
-    return;
-  }
-
-  cacheLoaded = true;
-  const cache = safeReadFallbackCache();
-  if (!cache) {
-    return;
-  }
-
-  cacheAvailable = true;
-  cacheLastUpdatedAt = cache.timestamp;
-
-  if (cache.roles?.length) {
-    roleStore.splice(0, roleStore.length, ...mergeEntitiesById(roleStore, cache.roles));
-  }
-
-  if (cache.users?.length) {
-    userStore.splice(0, userStore.length, ...mergeEntitiesById(userStore, cache.users));
-  }
-
-  if (cache.departments?.length) {
-    departmentStore.splice(0, departmentStore.length, ...mergeEntitiesById(departmentStore, cache.departments));
-  }
-
-  if (cache.teams?.length) {
-    teamStore.splice(0, teamStore.length, ...mergeEntitiesById(teamStore, cache.teams));
-  }
-
-  if (cache.documents?.length) {
-    documentStore.splice(0, documentStore.length, ...mergeEntitiesById(documentStore, cache.documents));
-  }
-
-  if (cache.resources?.length) {
-    resourceStore.splice(0, resourceStore.length, ...mergeEntitiesById(resourceStore, cache.resources));
-  }
-
-  if (cache.driveDocuments?.length) {
-    driveDocumentStore.splice(0, driveDocumentStore.length, ...mergeEntitiesById(driveDocumentStore, cache.driveDocuments));
-  }
-
-  if (cache.videos?.length) {
-    videoStore.splice(0, videoStore.length, ...mergeEntitiesById(videoStore, cache.videos));
-  }
-
-  if (cache.quickActions?.length) {
-    quickActionStore.splice(0, quickActionStore.length, ...mergeEntitiesById(quickActionStore, cache.quickActions));
-  }
-
-  if (cache.activityEvents?.length) {
-    activityStore.splice(0, activityStore.length, ...mergeEntitiesById(activityStore, cache.activityEvents));
-  }
-
-  if (cache.ingestionJobs?.length) {
-    ingestionJobStore.splice(0, ingestionJobStore.length, ...mergeEntitiesById(ingestionJobStore, cache.ingestionJobs));
-  }
-
-  if (cache.ingestionResults?.length) {
-    ingestionResultStore.splice(0, ingestionResultStore.length, ...mergeEntitiesById(ingestionResultStore, cache.ingestionResults));
-  }
-
-  if (cache.ingestionFailures?.length) {
-    ingestionFailureStore.splice(0, ingestionFailureStore.length, ...mergeEntitiesById(ingestionFailureStore, cache.ingestionFailures));
-  }
-
-  if (cache.pendingUploads?.length) {
-    pendingUploadStore.splice(0, pendingUploadStore.length, ...mergeEntitiesById(pendingUploadStore, cache.pendingUploads));
-  }
-}
-
-function persistFallbackCache() {
-  cacheLastUpdatedAt = new Date().toISOString();
-
-  safeWriteFallbackCache({
-    version: 1,
-    timestamp: cacheLastUpdatedAt,
-    roles: roleStore.slice(),
-    users: userStore.slice(),
-    departments: departmentStore.slice(),
-    teams: teamStore.slice(),
-    documents: documentStore.slice(),
-    resources: resourceStore.slice(),
-    driveDocuments: driveDocumentStore.slice(),
-    videos: videoStore.slice(),
-    quickActions: quickActionStore.slice(),
-    activityEvents: activityStore.slice(),
-    ingestionJobs: ingestionJobStore.slice(),
-    ingestionResults: ingestionResultStore.slice(),
-    ingestionFailures: ingestionFailureStore.slice(),
-    pinnedDocumentIds: documentStore.filter((document) => document.pinned).map((document) => document.id),
-    pendingUploads: pendingUploadStore.slice(),
-  });
-}
-
 function getProviderHealthState(): ProviderHealth {
   const lastCheckedAt = new Date().toISOString();
   const diagnostics = getSupabaseDiagnostics();
 
   const providerMode = getDataProviderMode();
   const effectiveProviderMode = getEffectiveDataProviderMode();
-  const fallbackMode = !isSupabaseAvailable();
+  const fallbackMode = productionEnforceSupabase ? false : !isSupabaseAvailable();
 
   if (!isSupabaseConfigured()) {
     return {
-      status: "fallback",
-      message: diagnostics.message,
+      status: productionEnforceSupabase ? "offline" : "fallback",
+      message: productionEnforceSupabase
+        ? "Supabase environment is not configured and local fallback is disabled in production."
+        : diagnostics.message,
       available: false,
       cacheApplied: cacheAvailable,
       lastCheckedAt,
@@ -375,7 +298,9 @@ function getProviderHealthState(): ProviderHealth {
 
   return {
     status: "offline",
-    message: diagnostics.message || "Supabase is unavailable. Serving cached or local fallback data.",
+    message: productionEnforceSupabase
+      ? "Supabase is unavailable and local fallback has been disabled in production."
+      : diagnostics.message || "Supabase is unavailable. Serving cached or local fallback data.",
     available: false,
     cacheApplied: cacheAvailable,
     lastCheckedAt,
@@ -399,32 +324,8 @@ const ROLES: Role[] = [
   {
     id: "role_cofounder",
     name: "Co-Founder / Admin",
-    description: "Full system administrator",
+    description: "Full platform owner with unrestricted access.",
     group: "co_founders",
-    userType: "employee",
-    createdById: "system",
-    permissions: {
-      documents: { create: true, view: true, edit: true, delete: true, upload: true },
-      users: { create: true, edit: true, delete: true, assignRole: true },
-      system: { adminPanelAccess: true, roleManagement: true },
-      features: {
-        viewActivity: true,
-        viewResources: true,
-        manageResources: true,
-        sendToAll: true,
-        viewHr: true,
-        viewOnboarding: true,
-        viewCreatorOps: true,
-        viewBrand: true,
-        viewOperations: true,
-      },
-    },
-  },
-  {
-    id: "role_admin",
-    name: "Admin",
-    description: "Administrative operations and system coordination.",
-    group: "team_lead",
     userType: "employee",
     createdById: "system",
     permissions: {
@@ -447,18 +348,21 @@ const ROLES: Role[] = [
   {
     id: "role_im_team_lead",
     name: "IM Team Lead",
-    description: "Leads influencer marketing operations and custom role creation.",
+    description: "Manages IM team, SOPs, and documentation. No access to TM content.",
     group: "team_lead",
     userType: "employee",
     createdById: "system",
     permissions: {
       documents: { create: true, view: true, edit: true, delete: true, upload: true },
       users: { create: false, edit: false, delete: false, assignRole: false },
-      system: { adminPanelAccess: false, roleManagement: true },
+      system: { adminPanelAccess: false, roleManagement: false },
       features: {
+        viewActivity: true,
+        viewResources: true,
+        manageResources: true,
         viewCreatorOps: true,
         viewOperations: true,
-        viewResources: true,
+        viewBrand: false,
         sendToAll: true,
       },
     },
@@ -466,65 +370,40 @@ const ROLES: Role[] = [
   {
     id: "role_tm_team_lead",
     name: "TM Team Lead",
-    description: "Leads talent management operations and custom role creation.",
+    description: "Manages TM team, SOPs, and documentation. No access to IM content.",
     group: "team_lead",
     userType: "employee",
     createdById: "system",
     permissions: {
       documents: { create: true, view: true, edit: true, delete: true, upload: true },
       users: { create: false, edit: false, delete: false, assignRole: false },
-      system: { adminPanelAccess: false, roleManagement: true },
+      system: { adminPanelAccess: false, roleManagement: false },
       features: {
+        viewActivity: true,
+        viewResources: true,
+        manageResources: true,
         viewBrand: true,
         viewOperations: true,
-        viewResources: true,
+        viewCreatorOps: false,
         sendToAll: true,
       },
     },
   },
   {
-    id: "role_im_member",
-    name: "IM Team Member",
-    description: "Influencer marketing team member.",
-    group: "team_member",
-    userType: "employee",
-    createdById: "system",
-    permissions: {
-      documents: { create: false, view: true, edit: false, delete: false, upload: false },
-      users: { create: false, edit: false, delete: false, assignRole: false },
-      system: { adminPanelAccess: false, roleManagement: false },
-      features: {
-        viewCreatorOps: true,
-        viewResources: true,
-      },
-    },
-  },
-  {
-    id: "role_tm_member",
-    name: "TM Team Member",
-    description: "Talent management team member.",
-    group: "team_member",
-    userType: "employee",
-    createdById: "system",
-    permissions: {
-      documents: { create: false, view: true, edit: false, delete: false, upload: false },
-      users: { create: false, edit: false, delete: false, assignRole: false },
-      system: { adminPanelAccess: false, roleManagement: false },
-      features: {
-        viewBrand: true,
-        viewResources: true,
-      },
-    },
-  },
-  {
     id: "role_hr",
-    name: "HR Specialist",
-    description: "HR access for people operations and compliance resources.",
+    name: "HR Manager",
+    description: "Independent management of onboarding, policies, and compliance.",
     group: "team_member",
     userType: "employee",
     createdById: "system",
     permissions: {
-      documents: { create: false, view: true, edit: false, delete: false, upload: true },
+      documents: { 
+        create: true, 
+        view: true, 
+        edit: true, 
+        delete: false, 
+        upload: true 
+      },
       users: { create: false, edit: false, delete: false, assignRole: false },
       system: { adminPanelAccess: false, roleManagement: false },
       features: {
@@ -538,13 +417,19 @@ const ROLES: Role[] = [
   },
   {
     id: "role_finance",
-    name: "Finance Specialist",
-    description: "Finance access for compliance, payroll, and resource management.",
+    name: "Finance Manager",
+    description: "Independent management of finance SOPs and reporting workflows.",
     group: "team_member",
     userType: "employee",
     createdById: "system",
     permissions: {
-      documents: { create: false, view: true, edit: false, delete: false, upload: true },
+      documents: { 
+        create: true, 
+        view: true, 
+        edit: true, 
+        delete: false, 
+        upload: true 
+      },
       users: { create: false, edit: false, delete: false, assignRole: false },
       system: { adminPanelAccess: false, roleManagement: false },
       features: {
@@ -558,7 +443,7 @@ const ROLES: Role[] = [
   {
     id: "role_intern",
     name: "Intern",
-    description: "Entry-level access for trainee staff.",
+    description: "Restricted access to onboarding and training materials.",
     group: "intern",
     userType: "employee",
     createdById: "system",
@@ -575,17 +460,41 @@ const ROLES: Role[] = [
   {
     id: "role_creator",
     name: "Creator",
-    description: "Creator access for content workflows and creator operations.",
+    description: "Independent role managing marketing assets and brand resources.",
     group: "creator",
     userType: "creator",
     createdById: "system",
     permissions: {
-      documents: { create: false, view: true, edit: false, delete: false, upload: false },
+      documents: { 
+        create: true, 
+        view: true, 
+        edit: true, 
+        delete: false, 
+        upload: true 
+      },
       users: { create: false, edit: false, delete: false, assignRole: false },
       system: { adminPanelAccess: false, roleManagement: false },
       features: {
         viewCreatorOps: true,
         viewResources: true,
+      },
+    },
+  },
+  {
+    id: "role_employee",
+    name: "Employee",
+    description: "Team-based member (IM/TM). Read-only access to team content.",
+    group: "team_member",
+    userType: "employee",
+    createdById: "system",
+    permissions: {
+      documents: { create: false, view: true, edit: false, delete: false, upload: true },
+      users: { create: false, edit: false, delete: false, assignRole: false },
+      system: { adminPanelAccess: false, roleManagement: false },
+      features: {
+        viewResources: true,
+        viewOnboarding: true,
+        viewOperations: true,
       },
     },
   },
@@ -694,7 +603,7 @@ const USERS: User[] = [
     email: "james@example.com",
     avatar: "JC",
     userType: "employee",
-    roleId: "role_im_member",
+    roleId: "role_employee",
     departmentId: "im",
     teamId: "team_im",
     permissionIds: ["view_library", "view_documents", "view_creator_ops", "view_resources"],
@@ -707,7 +616,7 @@ const USERS: User[] = [
     email: "ava@example.com",
     avatar: "AL",
     userType: "employee",
-    roleId: "role_tm_member",
+    roleId: "role_employee",
     departmentId: "tm",
     teamId: "team_tm",
     permissionIds: ["view_library", "view_documents", "view_brand", "view_resources"],
@@ -774,18 +683,18 @@ const RESOURCES: ResourceItem[] = [];
 const ACTIVITY_LOG: ActivityEvent[] = [];
 
 const roleStore: Role[] = [...ROLES];
-const userStore: User[] = [...USERS];
-const departmentStore: Department[] = [...DEPARTMENTS];
-const teamStore: Team[] = [...TEAMS];
-const documentStore: Document[] = [...DOCUMENTS];
+const userStore: User[] = configuredForSupabase ? [] : [...USERS];
+const departmentStore: Department[] = configuredForSupabase ? [] : [...DEPARTMENTS];
+const teamStore: Team[] = configuredForSupabase ? [] : [...TEAMS];
+const documentStore: Document[] = configuredForSupabase ? [] : [...DOCUMENTS];
 
 const DRIVE_DOCUMENT_REFS: DriveDocumentReference[] = [];
 
-const driveDocumentStore: DriveDocumentReference[] = [...DRIVE_DOCUMENT_REFS];
+const driveDocumentStore: DriveDocumentReference[] = configuredForSupabase ? [] : [...DRIVE_DOCUMENT_REFS];
 const videoStore: VideoItem[] = [];
 const quickActionStore: QuickActionItem[] = [];
-const resourceStore: ResourceItem[] = [...RESOURCES];
-const activityStore: ActivityEvent[] = [...ACTIVITY_LOG];
+const resourceStore: ResourceItem[] = configuredForSupabase ? [] : [...RESOURCES];
+const activityStore: ActivityEvent[] = configuredForSupabase ? [] : [...ACTIVITY_LOG];
 const ingestionJobStore: IngestionJob[] = [];
 const ingestionResultStore: IngestionResult[] = [];
 const ingestionFailureStore: IngestionFailure[] = [];
@@ -808,8 +717,6 @@ function notifyHydrationComplete() {
 }
 
 async function hydrateSupabaseCache() {
-  loadCachedFallbackData();
-
   if (!shouldUseSupabase()) {
     supabaseAvailable = false;
     notifyHydrationComplete();
@@ -826,21 +733,34 @@ async function hydrateSupabaseCache() {
   // Supabase is reachable. Keep the app in Supabase mode while cached data hydrates.
   supabaseAvailable = true;
 
+  // Typed helper to avoid `as any` on every withTimeout call.
+  // Supabase query builders don't expose a plain Promise type we can reference
+  // without the full generics, so we cast via `unknown` at a single boundary.
+  function timedFetch(table: string, errMessage: string) {
+    type RowResult = { data: Record<string, unknown>[] | null; error: { message: string } | null };
+    const fallback: RowResult = { data: [], error: { message: errMessage } };
+    return withTimeout(
+      supabase.from(table).select("*").limit(1000) as unknown as Promise<RowResult>,
+      DATA_HYDRATION_TIMEOUT_MS,
+      fallback
+    );
+  }
+
   try {
     const [rolesRes, usersRes, docsRes, resourcesRes, driveDocsRes, activityRes, departmentsRes, teamsRes, videosRes, quickActionsRes, ingestionJobsRes, ingestionResultsRes, ingestionFailuresRes] = await Promise.all([
-      withTimeout(supabase.from("roles").select("*").limit(1000), DATA_HYDRATION_TIMEOUT_MS, { data: [], error: { message: "Supabase roles fetch timed out." } } as any),
-      withTimeout(supabase.from("users").select("*").limit(1000), DATA_HYDRATION_TIMEOUT_MS, { data: [], error: { message: "Supabase users fetch timed out." } } as any),
-      withTimeout(supabase.from("documents").select("*").limit(1000), DATA_HYDRATION_TIMEOUT_MS, { data: [], error: { message: "Supabase documents fetch timed out." } } as any),
-      withTimeout(supabase.from("resources").select("*").limit(1000), DATA_HYDRATION_TIMEOUT_MS, { data: [], error: { message: "Supabase resources fetch timed out." } } as any),
-      withTimeout(supabase.from("drive_documents").select("*").limit(1000), DATA_HYDRATION_TIMEOUT_MS, { data: [], error: { message: "Supabase drive documents fetch timed out." } } as any),
-      withTimeout(supabase.from("activity_logs").select("*").limit(1000), DATA_HYDRATION_TIMEOUT_MS, { data: [], error: { message: "Supabase activity logs fetch timed out." } } as any),
-      withTimeout(supabase.from("departments").select("*").limit(1000), DATA_HYDRATION_TIMEOUT_MS, { data: [], error: { message: "Supabase departments fetch timed out." } } as any),
-      withTimeout(supabase.from("teams").select("*").limit(1000), DATA_HYDRATION_TIMEOUT_MS, { data: [], error: { message: "Supabase teams fetch timed out." } } as any),
+      timedFetch("roles",             "Supabase roles fetch timed out."),
+      timedFetch("users",             "Supabase users fetch timed out."),
+      timedFetch("documents",         "Supabase documents fetch timed out."),
+      timedFetch("resources",         "Supabase resources fetch timed out."),
+      timedFetch("drive_documents",   "Supabase drive documents fetch timed out."),
+      timedFetch("activity_logs",     "Supabase activity logs fetch timed out."),
+      timedFetch("departments",       "Supabase departments fetch timed out."),
+      timedFetch("teams",             "Supabase teams fetch timed out."),
       safeFetchSupabaseTable("videos"),
       safeFetchSupabaseTable("quick_actions"),
-      withTimeout(supabase.from("ingestion_jobs").select("*").limit(1000), DATA_HYDRATION_TIMEOUT_MS, { data: [], error: { message: "Supabase ingestion jobs fetch timed out." } } as any),
-      withTimeout(supabase.from("ingestion_results").select("*").limit(1000), DATA_HYDRATION_TIMEOUT_MS, { data: [], error: { message: "Supabase ingestion results fetch timed out." } } as any),
-      withTimeout(supabase.from("ingestion_failures").select("*").limit(1000), DATA_HYDRATION_TIMEOUT_MS, { data: [], error: { message: "Supabase ingestion failures fetch timed out." } } as any),
+      timedFetch("ingestion_jobs",     "Supabase ingestion jobs fetch timed out."),
+      timedFetch("ingestion_results",  "Supabase ingestion results fetch timed out."),
+      timedFetch("ingestion_failures", "Supabase ingestion failures fetch timed out."),
     ]);
 
     const requiredHydrationErrors = [
@@ -891,58 +811,56 @@ async function hydrateSupabaseCache() {
     supabaseAvailable = true;
 
     if (Array.isArray(rolesRes.data)) {
-      roleStore.splice(0, roleStore.length, ...mergeEntitiesById(roleStore, safeReadFallbackCache()?.roles ?? [], mapSupabaseRows<Role>(rolesRes.data)));
+      roleStore.splice(0, roleStore.length, ...mergeEntitiesById(roleStore, mapSupabaseRows<Role>(rolesRes.data)));
     }
 
     if (Array.isArray(usersRes.data)) {
-      userStore.splice(0, userStore.length, ...mergeEntitiesById(userStore, safeReadFallbackCache()?.users ?? [], mapSupabaseRows<User>(usersRes.data)));
+      userStore.splice(0, userStore.length, ...mergeEntitiesById(userStore, mapSupabaseRows<User>(usersRes.data)));
     }
 
     if (Array.isArray(docsRes.data)) {
-      documentStore.splice(0, documentStore.length, ...mergeEntitiesById(documentStore, safeReadFallbackCache()?.documents ?? [], mapSupabaseRows<Document>(docsRes.data)));
+      documentStore.splice(0, documentStore.length, ...mergeEntitiesById(documentStore, mapSupabaseRows<Document>(docsRes.data)));
     }
 
     if (Array.isArray(resourcesRes.data)) {
-      resourceStore.splice(0, resourceStore.length, ...mergeEntitiesById(resourceStore, safeReadFallbackCache()?.resources ?? [], mapSupabaseRows<ResourceItem>(resourcesRes.data)));
+      resourceStore.splice(0, resourceStore.length, ...mergeEntitiesById(resourceStore, mapSupabaseRows<ResourceItem>(resourcesRes.data)));
     }
 
     if (Array.isArray(driveDocsRes.data)) {
-      driveDocumentStore.splice(0, driveDocumentStore.length, ...mergeEntitiesById(driveDocumentStore, safeReadFallbackCache()?.driveDocuments ?? [], mapSupabaseRows<DriveDocumentReference>(driveDocsRes.data)));
+      driveDocumentStore.splice(0, driveDocumentStore.length, ...mergeEntitiesById(driveDocumentStore, mapSupabaseRows<DriveDocumentReference>(driveDocsRes.data)));
     }
 
     if (Array.isArray(videosRes)) {
-      videoStore.splice(0, videoStore.length, ...mergeEntitiesById(videoStore, safeReadFallbackCache()?.videos ?? [], mapSupabaseRows<VideoItem>(videosRes)));
+      videoStore.splice(0, videoStore.length, ...mergeEntitiesById(videoStore, mapSupabaseRows<VideoItem>(videosRes)));
     }
 
     if (Array.isArray(quickActionsRes)) {
-      quickActionStore.splice(0, quickActionStore.length, ...mergeEntitiesById(quickActionStore, safeReadFallbackCache()?.quickActions ?? [], mapSupabaseRows<QuickActionItem>(quickActionsRes)));
+      quickActionStore.splice(0, quickActionStore.length, ...mergeEntitiesById(quickActionStore, mapSupabaseRows<QuickActionItem>(quickActionsRes)));
     }
 
     if (Array.isArray(activityRes.data)) {
-      activityStore.splice(0, activityStore.length, ...mergeEntitiesById(activityStore, safeReadFallbackCache()?.activityEvents ?? [], mapSupabaseRows<ActivityEvent>(activityRes.data)));
+      activityStore.splice(0, activityStore.length, ...mergeEntitiesById(activityStore, mapSupabaseRows<ActivityEvent>(activityRes.data)));
     }
 
     if (Array.isArray(ingestionJobsRes.data)) {
-      ingestionJobStore.splice(0, ingestionJobStore.length, ...mergeEntitiesById(ingestionJobStore, safeReadFallbackCache()?.ingestionJobs ?? [], mapSupabaseRows<IngestionJob>(ingestionJobsRes.data)));
+      ingestionJobStore.splice(0, ingestionJobStore.length, ...mergeEntitiesById(ingestionJobStore, mapSupabaseRows<IngestionJob>(ingestionJobsRes.data)));
     }
 
     if (Array.isArray(ingestionResultsRes.data)) {
-      ingestionResultStore.splice(0, ingestionResultStore.length, ...mergeEntitiesById(ingestionResultStore, safeReadFallbackCache()?.ingestionResults ?? [], mapSupabaseRows<IngestionResult>(ingestionResultsRes.data)));
+      ingestionResultStore.splice(0, ingestionResultStore.length, ...mergeEntitiesById(ingestionResultStore, mapSupabaseRows<IngestionResult>(ingestionResultsRes.data)));
     }
 
     if (Array.isArray(ingestionFailuresRes.data)) {
-      ingestionFailureStore.splice(0, ingestionFailureStore.length, ...mergeEntitiesById(ingestionFailureStore, safeReadFallbackCache()?.ingestionFailures ?? [], mapSupabaseRows<IngestionFailure>(ingestionFailuresRes.data)));
+      ingestionFailureStore.splice(0, ingestionFailureStore.length, ...mergeEntitiesById(ingestionFailureStore, mapSupabaseRows<IngestionFailure>(ingestionFailuresRes.data)));
     }
 
     if (Array.isArray(departmentsRes.data)) {
-      departmentStore.splice(0, departmentStore.length, ...mergeEntitiesById(departmentStore, safeReadFallbackCache()?.departments ?? [], mapSupabaseRows<Department>(departmentsRes.data)));
+      departmentStore.splice(0, departmentStore.length, ...mergeEntitiesById(departmentStore, mapSupabaseRows<Department>(departmentsRes.data)));
     }
 
     if (Array.isArray(teamsRes.data)) {
-      teamStore.splice(0, teamStore.length, ...mergeEntitiesById(teamStore, safeReadFallbackCache()?.teams ?? [], mapSupabaseRows<Team>(teamsRes.data)));
+      teamStore.splice(0, teamStore.length, ...mergeEntitiesById(teamStore, mapSupabaseRows<Team>(teamsRes.data)));
     }
-
-    persistFallbackCache();
     await reconcileSupabaseData();
   } catch (error) {
     console.warn("Supabase hydration failed", error);
@@ -998,7 +916,16 @@ export function getRoles() {
 
 export function getRoleById(id: RoleId) {
   ensureSupabaseHydration();
-  return roleStore.find((role) => role.id === id);
+  const role = roleStore.find((role) => role.id === id);
+  if (role) {
+    return role;
+  }
+
+  if (id) {
+    console.warn(`Role lookup failed for '${id}', falling back to '${ROLE_IDS.EMPLOYEE}'.`);
+  }
+
+  return roleStore.find((role) => role.id === ROLE_IDS.EMPLOYEE) ?? roleStore[0] ?? null;
 }
 
 export function saveRole(role: Role) {
@@ -1012,8 +939,6 @@ export function saveRole(role: Role) {
   if (isSupabaseAvailable()) {
     void safeSupabaseWrite(() => supabase.from("roles").upsert(createUpsertPayload(role), { onConflict: "legacy_id" }));
   }
-
-  persistFallbackCache();
   notifyDataChange();
   return existing || role;
 }
@@ -1026,8 +951,6 @@ export function deleteRole(roleId: RoleId) {
   if (isSupabaseAvailable()) {
     void safeSupabaseWrite(() => supabase.from("roles").delete().eq("legacy_id", roleId));
   }
-
-  persistFallbackCache();
   notifyDataChange();
   return true;
 }
@@ -1093,15 +1016,13 @@ export function saveDriveDocumentReference(document: DriveDocumentReference) {
   if (isSupabaseAvailable()) {
     void safeSupabaseWrite(() => supabase.from("drive_documents").upsert(createUpsertPayload(document), { onConflict: "legacy_id" }));
   }
-
-  persistFallbackCache();
   notifyDataChange();
   return existing || document;
 }
 
 export function updateDriveDocumentSyncMetadata(
   id: string,
-  updates: Partial<Pick<DriveDocumentReference, "lastSyncedAt" | "lastDriveModifiedAt" | "syncStatus" | "version" | "updatedAt" | "updatedById">>
+  updates: Partial<Pick<DriveDocumentReference, "lastSyncedAt" | "lastDriveModifiedAt" | "lastDriveCreatedAt" | "syncStatus" | "version" | "updatedAt" | "updatedById">>
 ) {
   const document = getDriveDocumentById(id);
   if (!document) return undefined;
@@ -1110,8 +1031,6 @@ export function updateDriveDocumentSyncMetadata(
   if (isSupabaseAvailable()) {
     void safeSupabaseWrite(() => supabase.from("drive_documents").update(updates).eq("legacy_id", id));
   }
-
-  persistFallbackCache();
   notifyDataChange();
   return document;
 }
@@ -1124,8 +1043,6 @@ export function updateDriveDocumentPermissions(id: string, permissionSummary: Dr
   if (isSupabaseAvailable()) {
     void safeSupabaseWrite(() => supabase.from("drive_documents").update({ permission_summary: permissionSummary }).eq("legacy_id", id));
   }
-
-  persistFallbackCache();
   notifyDataChange();
   return document;
 }
@@ -1194,8 +1111,6 @@ export function saveIngestionJob(job: IngestionJob) {
   if (isSupabaseAvailable()) {
     void safeSupabaseWrite(() => supabase.from("ingestion_jobs").upsert(createUpsertPayload(persistedJob), { onConflict: "legacy_id" }));
   }
-
-  persistFallbackCache();
   notifyDataChange();
   return existing || job;
 }
@@ -1211,8 +1126,6 @@ export function saveIngestionResult(result: IngestionResult) {
   if (isSupabaseAvailable()) {
     void safeSupabaseWrite(() => supabase.from("ingestion_results").upsert(createUpsertPayload(result), { onConflict: "legacy_id" }));
   }
-
-  persistFallbackCache();
   notifyDataChange();
   return existing || result;
 }
@@ -1228,8 +1141,6 @@ export function saveIngestionFailure(failure: IngestionFailure) {
   if (isSupabaseAvailable()) {
     void safeSupabaseWrite(() => supabase.from("ingestion_failures").upsert(createUpsertPayload(failure), { onConflict: "legacy_id" }));
   }
-
-  persistFallbackCache();
   notifyDataChange();
   return existing || failure;
 }
@@ -1247,7 +1158,6 @@ export function saveDocument(document: Document) {
   }
 
   invalidateSearchIndex();
-  persistFallbackCache();
   notifyDataChange();
   return existing || document;
 }
@@ -1265,7 +1175,6 @@ export function saveResource(resource: ResourceItem) {
   }
 
   invalidateSearchIndex();
-  persistFallbackCache();
   notifyDataChange();
   return existing || resource;
 }
@@ -1276,8 +1185,6 @@ export function saveActivity(event: ActivityEvent) {
   if (isSupabaseAvailable()) {
     void safeSupabaseWrite(() => supabase.from("activity_logs").insert(createUpsertPayload(event)));
   }
-
-  persistFallbackCache();
   notifyDataChange();
   return event;
 }
@@ -1303,8 +1210,6 @@ export function saveVideo(video: VideoItem) {
   if (isSupabaseAvailable()) {
     void safeSupabaseWrite(() => supabase.from("videos").upsert(createUpsertPayload(video), { onConflict: "legacy_id" }));
   }
-
-  persistFallbackCache();
   notifyDataChange();
   return existing || video;
 }
@@ -1320,8 +1225,6 @@ export function saveQuickAction(action: QuickActionItem) {
   if (isSupabaseAvailable()) {
     void safeSupabaseWrite(() => supabase.from("quick_actions").upsert(createUpsertPayload(action), { onConflict: "legacy_id" }));
   }
-
-  persistFallbackCache();
   notifyDataChange();
   return existing || action;
 }
@@ -1334,8 +1237,6 @@ export function deleteVideo(videoId: string) {
   if (isSupabaseAvailable()) {
     void safeSupabaseWrite(() => supabase.from("videos").delete().eq("legacy_id", videoId));
   }
-
-  persistFallbackCache();
   notifyDataChange();
   return true;
 }
@@ -1348,8 +1249,6 @@ export function deleteQuickAction(actionId: string) {
   if (isSupabaseAvailable()) {
     void safeSupabaseWrite(() => supabase.from("quick_actions").delete().eq("legacy_id", actionId));
   }
-
-  persistFallbackCache();
   notifyDataChange();
   return true;
 }
@@ -1375,8 +1274,6 @@ export async function saveUploadFileToStorage(
 
     pendingUploadStore.unshift(pendingUpload);
     enqueueRetryUpload(pendingUpload);
-    persistFallbackCache();
-
     return {
       rawSourceUrl: undefined,
       previewUrl: undefined,
@@ -1408,8 +1305,6 @@ export async function saveUploadFileToStorage(
     };
     pendingUploadStore.unshift(pendingUpload);
     enqueueRetryUpload(pendingUpload);
-    persistFallbackCache();
-
     return {
       rawSourceUrl: undefined,
       previewUrl: undefined,
@@ -1441,9 +1336,6 @@ export async function saveUploadFileToStorage(
   if (isSupabaseAvailable()) {
     void safeSupabaseWrite(() => supabase.from("uploads").upsert(createUpsertPayload(uploadRecord), { onConflict: "legacy_id" }));
   }
-
-  persistFallbackCache();
-
   return {
     rawSourceUrl: uploadMetadata.publicUrl || undefined,
     previewUrl: uploadMetadata.previewUrl ?? undefined,
@@ -1469,7 +1361,6 @@ export async function syncPendingLocalChanges() {
 
   supabaseAvailable = true;
   await reconcileSupabaseData();
-  persistFallbackCache();
   notifyDataChange();
   return true;
 }
@@ -1485,8 +1376,6 @@ export function saveUser(user: User) {
   if (isSupabaseAvailable()) {
     void safeSupabaseWrite(() => supabase.from("users").upsert(createUpsertPayload(user), { onConflict: "legacy_id" }));
   }
-
-  persistFallbackCache();
   notifyDataChange();
   return existing || user;
 }
@@ -1499,9 +1388,6 @@ export function deleteResource(resourceId: string) {
   if (isSupabaseAvailable()) {
     void safeSupabaseWrite(() => supabase.from("resources").delete().eq("legacy_id", resourceId));
   }
-
-  persistFallbackCache();
   notifyDataChange();
   return true;
 }
-

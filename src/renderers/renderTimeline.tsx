@@ -1,13 +1,81 @@
-export function renderTimeline(block: { content: { items: Array<{ period: string; title: string; description: string }> }; id?: string }, index: number) {
+import type { TimelineBlock, TimelineItem } from "@/renderers/types";
+
+export function renderTimeline(block: TimelineBlock, index: number) {
   return (
-    <div key={block.id ?? `timeline-${index}`} className="rounded-3xl border border-border p-5 bg-bg-primary/80">
-      <div className="text-sm font-semibold text-content-primary">Timeline</div>
-      <div className="mt-3 space-y-3">
-        {block.content.items.map((item: any) => (
-          <div key={item.title} className="rounded-3xl border border-border-subtle bg-bg-secondary p-4">
-            <div className="text-sm font-semibold text-content-primary">{item.period}</div>
-            <p className="mt-1 text-sm text-content-secondary">{item.title}</p>
-            <p className="text-sm text-content-secondary">{item.description}</p>
+    <div
+      style={{
+        borderRadius: "var(--r-lg)",
+        border: "1px solid var(--border)",
+        background: "var(--surface)",
+        padding: "20px",
+      }}
+    >
+      <div
+        style={{
+          fontFamily: "var(--font-ui)",
+          fontSize: "11px",
+          fontWeight: 600,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          color: "var(--text-3)",
+          marginBottom: "16px",
+        }}
+      >
+        Timeline
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+        {block.content.items.map((item: TimelineItem, itemIndex: number) => (
+          <div
+            key={`${index}-timeline-${itemIndex}`}
+            style={{
+              display: "flex",
+              gap: "16px",
+              padding: "12px 0",
+              borderBottom:
+                itemIndex < block.content.items.length - 1
+                  ? "1px solid var(--border)"
+                  : "none",
+            }}
+          >
+            <div
+              style={{
+                flexShrink: 0,
+                width: "80px",
+                fontFamily: "var(--font-mono)",
+                fontSize: "11px",
+                fontWeight: 500,
+                color: "var(--accent)",
+                paddingTop: "2px",
+              }}
+            >
+              {item.period}
+            </div>
+            <div>
+              <div
+                style={{
+                  fontFamily: "var(--font-ui)",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  color: "var(--text)",
+                }}
+              >
+                {item.title}
+              </div>
+              {item.description && (
+                <p
+                  style={{
+                    marginTop: "3px",
+                    fontFamily: "var(--font-body)",
+                    fontSize: "13px",
+                    lineHeight: "1.5",
+                    color: "var(--text-2)",
+                    margin: "4px 0 0",
+                  }}
+                >
+                  {item.description}
+                </p>
+              )}
+            </div>
           </div>
         ))}
       </div>

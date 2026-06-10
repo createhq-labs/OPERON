@@ -1,25 +1,42 @@
 import type { DriveDocumentReference } from "@/core/operon";
 
-export interface ReconciliationResult {
+export interface RemoteDriveFileState {
   id: string;
-  action: "updated" | "created" | "ignored" | "removed";
-  documentId: string;
-  metadata?: Record<string, unknown>;
+  modifiedTime: string;
+  trashed?: boolean;
+  name?: string;
+  mimeType?: string;
 }
 
-export function reconcileDriveDocument(reference: DriveDocumentReference, remoteState: any): ReconciliationResult {
-  const remoteModifiedAt = remoteState?.modifiedTime;
-  const changed = remoteModifiedAt && remoteModifiedAt !== reference.lastDriveModifiedAt;
-  const action = !remoteState ? "ignored" : changed ? "updated" : "ignored";
+export interface ReconciliationResult {
+  documentId: string;
+  action: "created" | "updated" | "removed" | "unchanged";
+  remoteModifiedAt: string | null;
+  previousModifiedAt: string | null;
+}
+
+export function reconcileDriveDocument(
+  reference: DriveDocumentReference,
+  remoteState: RemoteDriveFileState | null
+): ReconciliationResult {
+  if (!remoteState || remoteState.trashed) {
+    return {
+      documentId: reference.id,
+      action: "removed",
+      remoteModifiedAt: null,
+      previousModifiedAt: reference.lastDriveModifiedAt ?? null,
+    };
+  }
+
+  const previousModifiedAt = reference.lastDriveModifiedAt ?? null;
+  const remoteModifiedAt = remoteState.modifiedTime;
+  const isNew = !previousModifiedAt;
+  const isChanged = !isNew && remoteModifiedAt !== previousModifiedAt;
 
   return {
-    id: `reconcile-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    action,
     documentId: reference.id,
-    metadata: {
-      remoteModifiedAt,
-      previousModifiedAt: reference.lastDriveModifiedAt,
-      changed: Boolean(changed),
-    },
+    action: isNew ? "created" : isChanged ? "updated" : "unchanged",
+    remoteModifiedAt,
+    previousModifiedAt,
   };
 }

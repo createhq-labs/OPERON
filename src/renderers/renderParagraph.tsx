@@ -1,7 +1,18 @@
-export function renderParagraph(block: { content: string; id?: string }) {
+import type { ParagraphBlock } from "@/renderers/types";
+
+export function renderParagraph(block: ParagraphBlock, index: number) {
   return (
-    <div key={block.id ?? block.content.slice(0, 32)} className="prose prose-sm text-content-secondary">
-      <p>{block.content}</p>
-    </div>
+    <p
+      key={block.id ?? `paragraph-${index}`}
+      style={{
+        fontFamily: "var(--font-body)",
+        fontSize: "var(--text-14)",
+        lineHeight: "1.7",
+        color: "var(--text-2)",
+        margin: 0,
+      }}
+    >
+      {block.content}
+    </p>
   );
 }

@@ -1,14 +1,50 @@
-export function renderResource(block: { content: { title: string; description: string; href: string; external?: boolean }; id?: string }, index: number) {
+import type { ResourceBlock } from "@/renderers/types";
+
+export function renderResource(block: ResourceBlock, _index: number) {
+  const { title, description, href, external } = block.content;
+
   return (
     <a
-      key={block.id ?? `resource-${index}`}
-      href={block.content.href}
-      target={block.content.external ? "_blank" : "_self"}
-      rel="noreferrer"
-      className="block rounded-3xl border border-border p-5 bg-bg-secondary text-sm text-content-primary transition hover:border-accent-soft"
+      href={href}
+      target={external ? "_blank" : undefined}
+      rel={external ? "noopener noreferrer" : undefined}
+      style={{
+        display: "block",
+        borderRadius: "var(--r-lg)",
+        border: "1px solid var(--border)",
+        background: "var(--surface)",
+        padding: "16px 20px",
+        textDecoration: "none",
+        transition: "border-color 150ms ease",
+      }}
+      onMouseEnter={(e) => {
+        (e.currentTarget as HTMLAnchorElement).style.borderColor = "var(--border-hover)";
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLAnchorElement).style.borderColor = "var(--border)";
+      }}
     >
-      <div className="font-semibold">{block.content.title}</div>
-      <p className="mt-2 text-content-secondary">{block.content.description}</p>
+      <div
+        style={{
+          fontFamily: "var(--font-ui)",
+          fontSize: "14px",
+          fontWeight: 600,
+          color: "var(--text)",
+        }}
+      >
+        {title}
+      </div>
+      <p
+        style={{
+          marginTop: "6px",
+          fontFamily: "var(--font-body)",
+          fontSize: "13px",
+          lineHeight: "1.5",
+          color: "var(--text-2)",
+        }}
+      >
+        {description}
+      </p>
     </a>
   );
 }

@@ -7,7 +7,11 @@ import { normalizeParsedDocument } from "./stages/normalize";
 import { enrichParsedDocument } from "./stages/enrich";
 import { indexParsedDocument } from "./stages/index";
 import { persistIngestionResult } from "./stages/persist";
-import { saveIngestionJob, saveDocument, saveIngestionResult, saveActivity, getDocumentById } from "@/services/api";
+import { saveIngestionJob, saveDocument, saveIngestionResult, saveActivity, getDocumentById, getDriveDocumentById, updateDriveDocumentSyncMetadata } from "@/services/api";
+
+function isDriveDocument(document: any): boolean {
+  return Boolean(document && (document.driveFileId || document.source === "google_drive" || document.source === "local_drive"));
+}
 
 export interface IngestionStageContext {
   job: IngestionJob;
@@ -42,9 +46,14 @@ function updateJobStatus(job: IngestionJob, status: IngestionJob["status"], stag
 export async function runIngestionPipeline(job: IngestionJob): Promise<IngestionResult> {
   let activeJob = updateJobStatus(job, "processing", "pipeline.start", "Starting ingestion pipeline");
 
-  const document = getDocumentById(activeJob.documentId);
+  const document = getDocumentById(activeJob.documentId) ?? getDriveDocumentById(activeJob.documentId);
   if (!document) {
     throw new Error("Document referenced by ingestion job was not found.");
+  }
+
+  const driveDocument = isDriveDocument(document);
+  if (driveDocument) {
+    updateDriveDocumentSyncMetadata(document.id, { syncStatus: "syncing", lastSyncedAt: new Date().toISOString() });
   }
 
   try {
@@ -57,6 +66,13 @@ export async function runIngestionPipeline(job: IngestionJob): Promise<Ingestion
     await indexParsedDocument(enriched, activeJob);
 
     const result = await persistIngestionResult(activeJob, document, enriched);
+    if (driveDocument) {
+      updateDriveDocumentSyncMetadata(document.id, {
+        syncStatus: "synced",
+        lastSyncedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+    }
     await saveActivity({
       id: `activity-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       userId: (activeJob.metadata?.authorId as string) || document.authorId,
@@ -73,6 +89,9 @@ export async function runIngestionPipeline(job: IngestionJob): Promise<Ingestion
     return result;
   } catch (error) {
     const failure = createFallbackIngestionFailure(activeJob, error);
+    if (driveDocument) {
+      updateDriveDocumentSyncMetadata(document.id, { syncStatus: "failed", lastSyncedAt: new Date().toISOString() });
+    }
     saveActivity({
       id: `activity-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       userId: (activeJob.metadata?.authorId as string) || document.authorId,

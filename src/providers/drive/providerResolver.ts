@@ -16,53 +16,43 @@ export interface DriveProviderDiagnostics {
 
 const GOOGLE_DRIVE_CLIENT_ID = process.env.GOOGLE_DRIVE_CLIENT_ID ?? "";
 const GOOGLE_DRIVE_CLIENT_SECRET = process.env.GOOGLE_DRIVE_CLIENT_SECRET ?? "";
-const GOOGLE_DRIVE_CREDENTIALS_AVAILABLE = Boolean(GOOGLE_DRIVE_CLIENT_ID && GOOGLE_DRIVE_CLIENT_SECRET);
 
-let provider: DriveProvider | null = null;
+export const GOOGLE_DRIVE_CREDENTIALS_AVAILABLE = Boolean(
+  GOOGLE_DRIVE_CLIENT_ID && GOOGLE_DRIVE_CLIENT_SECRET
+);
 
-export function isGoogleDriveConfigured() {
+/**
+ * Module-level singleton — scoped to the Node.js module instance.
+ * In Next.js development with hot module replacement, modules are re-evaluated
+ * on change, so this naturally resets when provider configuration changes.
+ * In production, this persists for the lifetime of the server process, which is correct.
+ */
+let _provider: DriveProvider | null = null;
+
+export function isGoogleDriveConfigured(): boolean {
   return GOOGLE_DRIVE_CREDENTIALS_AVAILABLE;
 }
 
-export function resolveDriveProvider(): DriveProvider {
-  if (!provider) {
-    if (GOOGLE_DRIVE_CREDENTIALS_AVAILABLE) {
-      provider = new GoogleDriveProvider();
-    } else {
-      provider = new LocalDriveProvider();
-    }
-  }
-  return provider!;
-}
-
 export function getDriveProvider(): DriveProvider {
-  return resolveDriveProvider();
+  if (!_provider) {
+    _provider = GOOGLE_DRIVE_CREDENTIALS_AVAILABLE
+      ? new GoogleDriveProvider()
+      : new LocalDriveProvider();
+  }
+  return _provider;
 }
 
 export function getDriveProviderDiagnostics(): DriveProviderDiagnostics {
-  const requestsEnabled = process.env.NEXT_PUBLIC_ENABLE_GOOGLE_DRIVE === "true";
-  const providerMode: DriveProviderMode = GOOGLE_DRIVE_CREDENTIALS_AVAILABLE ? "google" : "local";
-  const activeProvider: DriveProviderDiagnostics["activeProvider"] = GOOGLE_DRIVE_CREDENTIALS_AVAILABLE
-    ? "GoogleDriveProvider"
-    : "LocalDriveProvider";
-  let status: DriveProviderHealthStatus = GOOGLE_DRIVE_CREDENTIALS_AVAILABLE ? "connected" : "local";
-  let message = "Local enterprise Drive provider is active.";
-
-  if (!GOOGLE_DRIVE_CREDENTIALS_AVAILABLE && requestsEnabled) {
-    status = "unavailable";
-    message = "Google Drive was requested, but credentials are not configured. Local Drive fallback is only active when Google Drive is disabled.";
-  }
-
-  if (GOOGLE_DRIVE_CREDENTIALS_AVAILABLE) {
-    message = "Google Drive credentials are configured. GoogleDriveProvider is available.";
-  }
+  const isGoogle = GOOGLE_DRIVE_CREDENTIALS_AVAILABLE;
 
   return {
-    activeProvider,
-    providerMode,
-    status,
-    message,
-    credentialsAvailable: GOOGLE_DRIVE_CREDENTIALS_AVAILABLE,
-    supportsAuth: GOOGLE_DRIVE_CREDENTIALS_AVAILABLE,
+    activeProvider: isGoogle ? "GoogleDriveProvider" : "LocalDriveProvider",
+    providerMode: isGoogle ? "google" : "local",
+    status: isGoogle ? "connected" : "local",
+    message: isGoogle
+      ? "Google Drive credentials are configured. GoogleDriveProvider is active."
+      : "Google Drive credentials are not configured. LocalDriveProvider is active as fallback.",
+    credentialsAvailable: isGoogle,
+    supportsAuth: isGoogle,
   };
 }

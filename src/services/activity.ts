@@ -1,6 +1,15 @@
+import crypto from "crypto";
 import type { ActivityEvent, User } from "@/core/operon";
+import { isAdmin } from "@/core/operon";
+import { canViewActivity } from "@/security/permissions";
 
-export function createActivityEvent(event: Omit<ActivityEvent, "id" | "timestamp">): ActivityEvent {
+/**
+ * Creates a new ActivityEvent with a generated ID and current timestamp.
+ * The caller provides all domain fields; ID and timestamp are system-generated.
+ */
+export function createActivityEvent(
+  event: Omit<ActivityEvent, "id" | "timestamp">
+): ActivityEvent {
   return {
     id: `activity_${crypto.randomUUID()}`,
     timestamp: new Date().toISOString(),
@@ -8,18 +17,25 @@ export function createActivityEvent(event: Omit<ActivityEvent, "id" | "timestamp
   };
 }
 
-export function filterActivityForUser(user: User | null, events: ActivityEvent[]): ActivityEvent[] {
-  if (!user) {
-    return [];
+/**
+ * Filters an activity feed to the events visible to `user`.
+ *
+ * Rules:
+ * - Unauthenticated users see nothing.
+ * - Admins and users with the `view_activity` permission see all events.
+ * - All other users see only their own events and system-level events.
+ */
+export function filterActivityForUser(
+  user: User | null,
+  events: ActivityEvent[]
+): ActivityEvent[] {
+  if (!user) return [];
+
+  if (isAdmin(user) || canViewActivity(user)) {
+    return events;
   }
 
-  return events.filter((event) => {
-    if (event.userId === user.id) {
-      return true;
-    }
-    if (user.roleId === "role_admin" || user.roleId === "role_cofounder") {
-      return true;
-    }
-    return event.targetType === "system";
-  });
+  return events.filter(
+    (event) => event.userId === user.id || event.targetType === "system"
+  );
 }

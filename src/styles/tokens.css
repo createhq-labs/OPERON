@@ -1,0 +1,311 @@
+/**
+ * Operon Design Tokens
+ * Theme: Dark Void — Warm Ember Glow
+ *
+ * Rules (enforced here, not negotiated):
+ *   - Background is #0A0A0A. True void. Not dark gray, not charcoal.
+ *   - One radial ember orb sits behind all content. Defined here, rendered in ember.css.
+ *   - Text is white or opacity-white only. No colored text.
+ *   - Accent (#F5A623) appears only sparingly — one highlight, active states.
+ *   - Borders are near-invisible white. Never colored.
+ *   - Shadows are pure black. No color in shadows.
+ *   - Typography: massive display vs tiny body. The gap IS the hierarchy.
+ *   - Display weight is light (300) so scale contrast reads louder.
+ *   - Space is extreme. Emptiness is not waste — it is the design.
+ *
+ * Namespace: --op-* canonical. Short aliases (--bg, --text etc) kept for components.
+ */
+
+:root {
+
+  /* ── Void backgrounds ──────────────────────────────────────────────────── */
+
+  --op-bg:        #000000;                    /* Pure black — the void.                  */
+  --op-surface:   rgba(12, 10, 8, 0.75);      /* Glass panel — orb bleeds through.       */
+  --op-surface-2: rgba(16, 13, 10, 0.70);     /* Secondary glass.                        */
+  --op-surface-3: rgba(22, 18, 13, 0.82);     /* Elevated glass — toasts, dropdowns.     */
+  --op-overlay:   rgba(0, 0, 0, 0.80);
+
+  /* Sidebar — more opaque to anchor the nav rail */
+  --op-sidebar-bg: rgba(8, 7, 5, 0.88);
+
+  /* Short aliases — used by Sidebar, page.tsx inline styles */
+  --bg:        var(--op-bg);
+  --surface:   var(--op-surface);
+  --surface-2: var(--op-surface-2);
+  --surface-3: var(--op-surface-3);
+
+  /* Glass backdrop blur */
+  --glass-blur:    blur(20px);
+  --glass-blur-sm: blur(12px);
+  --glass-blur-lg: blur(32px);
+
+  /* Tailwind namespace */
+  --color-bg-base:        var(--op-bg);
+  --color-bg-surface:     var(--op-surface);
+  --color-bg-surface-alt: var(--op-surface-2);
+  --color-bg-elevated:    var(--op-surface-3);
+  --color-bg-overlay:     var(--op-overlay);
+
+  /* ── Ember glow ────────────────────────────────────────────────────────── */
+  /*
+   * The ONLY colour source in the entire UI.
+   * An orb of warm amber-orange light bleeding from behind the content.
+   * Core: hot amber → mid: burnt sienna → edge: deep crimson → void.
+   * Position: upper-right, partially off-canvas — asymmetric, like real light.
+   *
+   * --op-ember-glow is used by ember.css for the ::before pseudo-element.
+   * --op-ember-glow-pulse is used by the @keyframes animation (slightly hotter).
+   */
+  --op-ember-core:  #F08020;
+  --op-ember-mid:   #8C3008;
+  --op-ember-edge:  #3D0E04;
+
+  --op-ember-glow: radial-gradient(
+    circle at 55% 45%,
+    rgba(240, 130, 10, 0.90)  0%,
+    rgba(190,  70,  6, 0.50) 28%,
+    rgba(100,  30,  3, 0.18) 55%,
+    transparent               78%
+  );
+
+  --op-ember-glow-pulse: radial-gradient(
+    circle at 55% 45%,
+    rgba(255, 145, 15, 0.95)  0%,
+    rgba(210,  85,  8, 0.60) 28%,
+    rgba(120,  40,  4, 0.22) 55%,
+    transparent               78%
+  );
+
+  /* ── Text — white only, three opacity levels ───────────────────────────── */
+
+  --op-text:   #FFFFFF;                    /* Primary. Full white. Headlines, labels.  */
+  --op-text-2: rgba(255, 255, 255, 0.55);  /* Secondary. Body, descriptions.           */
+  --op-text-3: rgba(255, 255, 255, 0.32);  /* Tertiary. Captions, meta, placeholders.  */
+
+  /* Short aliases */
+  --text:   var(--op-text);
+  --text-2: var(--op-text-2);
+  --text-3: var(--op-text-3);
+
+  /* Tailwind namespace */
+  --color-text-primary:   var(--op-text);
+  --color-text-secondary: var(--op-text-2);
+  --color-text-muted:     var(--op-text-3);
+  --color-text-inverse:   #0A0A0A;
+
+  /* ── Borders — near-invisible white ───────────────────────────────────── */
+
+  --op-border:        rgba(255, 255, 255, 0.08);   /* Resting. Cards barely visible.   */
+  --op-border-hover:  rgba(255, 255, 255, 0.18);   /* Hover. Slightly brighter.        */
+  --op-border-strong: rgba(255, 255, 255, 0.28);   /* Active / selected.               */
+
+  /* Short aliases */
+  --border:       var(--op-border);
+  --border-hover: var(--op-border-hover);
+
+  /* Tailwind namespace */
+  --color-border-default: var(--op-border);
+  --color-border-subtle:  var(--op-border);
+  --color-border-strong:  var(--op-border-hover);
+
+  /* ── Accent — ember gold. Use sparingly. One thing at a time. ──────────── */
+
+  --op-accent:     #F5A623;
+  --op-accent-dim: rgba(245, 166, 35, 0.14);
+
+  /* Short aliases */
+  --accent:     var(--op-accent);
+  --accent-dim: var(--op-accent-dim);
+
+  /* Tailwind namespace */
+  --color-accent-gold:    var(--op-accent);
+  --color-accent-primary: var(--op-accent);
+
+  /* ── Interactive states ─────────────────────────────────────────────────── */
+
+  --color-hover-bg:   rgba(255, 255, 255, 0.04);
+  --color-active-bg:  rgba(255, 255, 255, 0.07);
+  --color-focus-ring: rgba(255, 255, 255, 0.18);
+
+  /* ── Status — desaturated. Minimal. Not a rainbow. ─────────────────────── */
+
+  --color-success: rgba(255, 255, 255, 0.70);
+  --color-warning: #F5A623;
+  --color-error:   rgba(255, 90, 70, 0.90);
+  --color-info:    rgba(255, 255, 255, 0.50);
+
+  /* ── Typography — font families ────────────────────────────────────────── */
+
+  --font-display: 'Satoshi', 'Plus Jakarta Sans', sans-serif;
+  --font-heading: 'Plus Jakarta Sans', sans-serif;
+  --font-ui:      'Plus Jakarta Sans', sans-serif;
+  --font-body:    'Inter', sans-serif;
+  --font-mono:    'JetBrains Mono', monospace;
+
+  /* ── Typography — scale ─────────────────────────────────────────────────── */
+  /*
+   * Two tiers only: MASSIVE and tiny.
+   * There is no "medium" size that gets emphasis.
+   * The scale contrast IS the visual hierarchy.
+   * Clamp() keeps display sizes proportional on small screens.
+   */
+
+  /* Display — these should feel oversized. That is correct. */
+  --text-96: clamp(52px, 8vw,  96px);   /* Full hero / landing statement   */
+  --text-54: clamp(36px, 5vw,  54px);   /* Section hero                    */
+  --text-30: clamp(22px, 3vw,  30px);   /* Page title                      */
+  --text-20: clamp(16px, 2vw,  20px);   /* Subheading                      */
+
+  /* UI — restrained. These are small on purpose. */
+  --text-16: 1rem;       /* Standard body text               */
+  --text-14: 0.875rem;   /* UI text — the workhorse          */
+  --text-13: 0.8125rem;  /* Small UI, buttons                */
+  --text-12: 0.75rem;    /* Captions                         */
+  --text-11: 0.6875rem;  /* Labels, badges — almost invisible */
+
+  /* Tailwind namespace aliases */
+  --text-xs:   var(--text-11);
+  --text-sm:   var(--text-12);
+  --text-base: var(--text-14);
+  --text-lg:   var(--text-16);
+  --text-xl:   var(--text-20);
+  --text-2xl:  1.5rem;
+  --text-3xl:  var(--text-30);
+  --text-4xl:  2.25rem;
+  --text-5xl:  var(--text-54);
+  --text-6xl:  var(--text-96);
+
+  /* ── Typography — display weights and tracking ──────────────────────────── */
+  /*
+   * Display headings are LIGHT (300). Heavy weight at large size = clunky.
+   * Light weight at large size = editorial, expensive-feeling.
+   * Small UI text uses medium (500) so it reads despite being tiny.
+   */
+  --display-weight:   300;
+  --display-tracking: -0.03em;   /* Tight. Big text needs less air.          */
+  --heading-weight:   400;
+  --heading-tracking: -0.02em;
+  --ui-weight:        500;
+  --body-weight:      400;
+
+  /* Tailwind aliases */
+  --weight-light:    300;
+  --weight-normal:   400;
+  --weight-medium:   500;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+
+  /* Tracking */
+  --tracking-tight:  -0.03em;
+  --tracking-normal:  0;
+  --tracking-wide:    0.06em;
+  --tracking-wider:   0.08em;
+  --tracking-widest:  0.12em;
+
+  /* Leading */
+  --leading-tight:  1.1;
+  --leading-snug:   1.3;
+  --leading-normal: 1.6;
+  --leading-loose:  1.8;
+
+  /* ── Border radius ──────────────────────────────────────────────────────── */
+
+  --r-sm:   6px;
+  --r-md:   10px;
+  --r-lg:   14px;
+  --r-xl:   20px;
+  --r-2xl:  28px;
+  --r-full: 9999px;
+
+  /* Tailwind aliases */
+  --radius-sm:   var(--r-sm);
+  --radius-md:   var(--r-md);
+  --radius-lg:   var(--r-lg);
+  --radius-xl:   var(--r-xl);
+  --radius-2xl:  var(--r-2xl);
+  --radius-full: var(--r-full);
+
+  /* ── Spacing — generous. Emptiness earns attention. ────────────────────── */
+
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+  --space-24: 96px;
+  --space-32: 128px;
+  --space-40: 160px;
+
+  /* ── Shadows — pure black. Zero colour. ────────────────────────────────── */
+
+  --shadow-sm:          0 1px  4px rgba(0, 0, 0, 0.60);
+  --shadow-md:          0 4px 16px rgba(0, 0, 0, 0.70);
+  --shadow-lg:          0 8px 32px rgba(0, 0, 0, 0.80);
+  --shadow-xl:          0 24px 64px rgba(0, 0, 0, 0.85);
+  --shadow-card:        0 2px 12px rgba(0, 0, 0, 0.55);
+  --shadow-input-focus: 0 0 0 3px rgba(255, 255, 255, 0.06);
+
+  /* ── Floating nav pill ──────────────────────────────────────────────────── */
+  /*
+   * The nav does NOT touch screen edges.
+   * It floats centred with its own pill shadow.
+   * Background: slightly translucent surface with backdrop blur.
+   */
+  --nav-pill-bg:     rgba(17, 17, 17, 0.88);
+  --nav-pill-border: rgba(255, 255, 255, 0.10);
+  --nav-pill-blur:   blur(20px);
+  --nav-pill-radius: var(--r-full);
+  --nav-pill-height: 44px;
+  --nav-pill-shadow: 0 4px 24px rgba(0, 0, 0, 0.6);
+
+  /* ── Blur ───────────────────────────────────────────────────────────────── */
+
+  --blur-sm: blur(4px);
+  --blur-md: blur(16px);
+  --blur-lg: blur(24px);
+  --blur-xl: blur(48px);
+
+  /* ── Motion — subtle. Fade and lift only. Nothing bounces, spins, or flips. */
+
+  --ease:          cubic-bezier(0.44, 0, 0.56, 1);
+  --ease-out:      cubic-bezier(0, 0, 0.2, 1);
+  --ease-in:       cubic-bezier(0.4, 0, 1, 1);
+  --ease-spring:   cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-standard: cubic-bezier(0.44, 0, 0.56, 1);
+
+  --dur-fast:   120ms;
+  --dur-normal: 220ms;
+  --dur-slow:   350ms;
+  --dur-slower: 600ms;
+
+  /* Tailwind aliases */
+  --duration-fast:   var(--dur-fast);
+  --duration-normal: var(--dur-normal);
+  --duration-slow:   var(--dur-slow);
+  --duration-slower: var(--dur-slower);
+
+  /* ── Layout ─────────────────────────────────────────────────────────────── */
+
+  --sidebar-width:     220px;
+  --content-max-width: 1400px;
+  --page-padding-x:    var(--space-8);
+  --page-padding-y:    var(--space-10);
+
+}
+
+/* ── Reduced motion ─────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration:        0.01ms !important;
+    transition-duration:       0.01ms !important;
+    animation-iteration-count: 1      !important;
+  }
+}

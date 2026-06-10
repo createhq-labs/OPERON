@@ -1,31 +1,91 @@
 import type { NormalizedDocumentSource } from "@/providers/types";
+import { hydrateGoogleDriveMetadata } from "./metadata";
+
+export type GoogleDriveWebhookEventType =
+  | "content_changed"
+  | "permissions_changed"
+  | "deleted"
+  | "created"
+  | "renamed"
+  | "moved";
 
 export interface GoogleDriveWebhookEvent {
   documentId: string;
-  eventType: "content_changed" | "permissions_changed" | "deleted" | "created";
+  eventType: GoogleDriveWebhookEventType;
   timestamp: string;
-  payload?: Record<string, unknown>;
+  /** Optional access token for fetching fresh metadata from the Drive API. */
+  accessToken?: string;
+  payload?: {
+    name?: string;
+    mimeType?: string;
+    webViewLink?: string;
+    modifiedTime?: string;
+    [key: string]: unknown;
+  };
 }
 
-export function handleGoogleDriveWebhook(event: GoogleDriveWebhookEvent): NormalizedDocumentSource | null {
+export interface WebhookHandlerResult {
+  documentId: string;
+  eventType: GoogleDriveWebhookEventType;
+  action: "sync" | "remove" | "ignore";
+  source: NormalizedDocumentSource | null;
+}
+
+export async function handleGoogleDriveWebhook(
+  event: GoogleDriveWebhookEvent
+): Promise<WebhookHandlerResult> {
   if (!event?.documentId) {
-    console.warn("Received Drive webhook without a documentId", event);
-    return null;
+    throw new Error("Drive webhook received without a documentId.");
   }
 
-  const rawUrl = `https://docs.google.com/document/d/${event.documentId}/edit`;
-  const title = `Google Drive ${event.documentId}`;
-  const description = `Received Drive webhook event ${event.eventType} for document ${event.documentId}.`;
+  const { documentId, eventType, timestamp, payload, accessToken } = event;
+
+  if (eventType === "deleted") {
+    return {
+      documentId,
+      eventType,
+      action: "remove",
+      source: null,
+    };
+  }
+
+  if (eventType === "permissions_changed") {
+    return {
+      documentId,
+      eventType,
+      action: "ignore",
+      source: null,
+    };
+  }
+
+  // For content_changed, created, renamed, moved — hydrate fresh metadata from Drive
+  let source: NormalizedDocumentSource;
+  try {
+    if (!accessToken) {
+      throw new Error("No access token available for Drive API call.");
+    }
+    source = await hydrateGoogleDriveMetadata(documentId, accessToken);
+  } catch {
+    // Fall back to constructing from webhook payload if Drive API is unreachable
+    source = {
+      id: documentId,
+      provider: "googleDrive",
+      sourceType: "google_drive",
+      title: payload?.name ?? "Untitled",
+      description: "",
+      rawUrl:
+        payload?.webViewLink ??
+        `https://drive.google.com/file/d/${documentId}/view`,
+      mimeType: payload?.mimeType ?? "application/octet-stream",
+      createdAt: timestamp,
+      updatedAt: payload?.modifiedTime ?? timestamp,
+    };
+  }
 
   return {
-    id: event.documentId,
-    provider: "googleDrive",
-    sourceType: "google_drive",
-    title,
-    description,
-    rawUrl,
-    mimeType: "application/vnd.google-apps.document",
-    createdAt: event.timestamp,
-    updatedAt: event.timestamp,
+    documentId,
+    eventType,
+    action: "sync",
+    source,
   };
 }

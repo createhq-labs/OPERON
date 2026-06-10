@@ -1,8 +1,12 @@
-import { getDriveProvider as resolveDriveProvider, getDriveProviderDiagnostics, isGoogleDriveConfigured } from "@/providers/drive/providerResolver";
-import type { DriveProvider } from "@/providers/drive/driveProvider";
+export {
+  getDriveProvider,
+  getDriveProviderDiagnostics,
+  isGoogleDriveConfigured,
+  GOOGLE_DRIVE_CREDENTIALS_AVAILABLE,
+} from "@/providers/drive/providerResolver";
 
-export { resolveDriveProvider, getDriveProviderDiagnostics, isGoogleDriveConfigured };
-
-export function getDriveProvider(): DriveProvider {
-  return resolveDriveProvider();
-}
+export type {
+  DriveProviderMode,
+  DriveProviderHealthStatus,
+  DriveProviderDiagnostics,
+} from "@/providers/drive/providerResolver";

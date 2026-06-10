@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { motion } from "framer-motion";
 import type { User } from "@/core/operon";
 import type { DriveDiagnostics, DriveSyncMode } from "@/services/drive";
 import {
@@ -24,6 +25,26 @@ interface DrivePanelProps {
   driveDiagnostics?: DriveDiagnostics | null;
   onDiagnosticsUpdate: (diagnostics: DriveDiagnostics) => void;
 }
+
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.1,
+      delayChildren: 0.1,
+    },
+  },
+};
+
+const itemVariants = {
+  hidden: { opacity: 0, y: 12 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.4, ease: "easeOut" },
+  },
+};
 
 export function DrivePanel({
   user,
@@ -125,129 +146,216 @@ export function DrivePanel({
   const failedCount = driveDiagnostics?.ingestion.failed ?? 0;
 
   return (
-    <section className="grid gap-8 xl:grid-cols-[1fr_280px]">
-      <div className="rounded-[12px] border border-border bg-bg-secondary p-6">
-        <div className="mb-8">
-          <h2 className="text-2xl font-semibold text-content-primary">Drive</h2>
-        </div>
+    <motion.section
+      className="grid gap-8 xl:grid-cols-[1fr_320px]"
+      variants={containerVariants}
+      initial="hidden"
+      animate="visible"
+    >
+      <motion.div
+        variants={itemVariants}
+        className="glass-card border-white/8 p-8 rounded-2xl"
+      >
+        <motion.div
+          className="mb-8"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.3, delay: 0.2 }}
+        >
+          <h2 className="text-h2 text-white">Cloud Storage</h2>
+          <p className="text-text-secondary mt-1">Manage Google Drive connections and sync</p>
+        </motion.div>
 
         {hasAccounts ? (
-          <div className="space-y-4">
-            {accounts.map((account) => (
-              <div
+          <motion.div
+            className="space-y-3"
+            variants={containerVariants}
+            initial="hidden"
+            animate="visible"
+          >
+            {accounts.map((account, index) => (
+              <motion.div
                 key={account.id}
-                className="flex items-center justify-between rounded-[12px] border border-border/50 bg-bg-primary p-4"
+                variants={itemVariants}
+                className="glass-card border-white/8 p-4 rounded-xl flex items-center justify-between hover:border-white/12 transition-all duration-250"
+                whileHover={{ x: 2 }}
               >
                 <div className="min-w-0 flex-1">
-                  <div className="truncate font-medium text-content-primary">
+                  <div className="truncate font-600 text-white">
                     {account.displayName || account.email}
                   </div>
-                  <div className="mt-1 truncate text-sm text-content-tertiary">
+                  <div className="mt-1 truncate text-sm text-text-tertiary">
                     {account.email}
                   </div>
                 </div>
                 {canManageDrive && (
-                  <button
+                  <motion.button
                     type="button"
                     onClick={() => handleDisconnect(account.id)}
                     disabled={disconnectingId === account.id}
-                    className="shrink-0 ml-4 text-sm text-rose-600 hover:text-rose-700 disabled:opacity-50"
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    className="shrink-0 ml-4 px-3 py-1.5 text-sm font-500 text-status-error hover:bg-status-error/10 rounded-lg transition-all duration-250 disabled:opacity-50"
                   >
-                    {disconnectingId === account.id ? "…" : "Remove"}
-                  </button>
+                    {disconnectingId === account.id ? "Removing…" : "Remove"}
+                  </motion.button>
                 )}
-              </div>
+              </motion.div>
             ))}
-          </div>
+          </motion.div>
         ) : null}
 
         {canManageDrive && (
-          <div className="mt-8 space-y-3 border-t border-border/50 pt-8">
-            <button
+          <motion.div
+            variants={itemVariants}
+            className="mt-8 space-y-3 border-t border-white/8 pt-8"
+          >
+            <motion.button
               type="button"
               onClick={handleConnect}
               disabled={syncing}
-              className="w-full rounded-[12px] bg-blue-600 px-4 py-3 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              whileHover={{ scale: 1.02, y: -1 }}
+              whileTap={{ scale: 0.98 }}
+              className="w-full btn-premium h-11 font-600 text-white disabled:opacity-50"
             >
               {hasAccounts ? "Add Account" : "Connect Drive"}
-            </button>
+            </motion.button>
             {hasAccounts && (
-              <div className="grid gap-2 grid-cols-2">
-                <button
+              <motion.div
+                className="grid gap-2 grid-cols-2"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3, delay: 0.3 }}
+              >
+                <motion.button
                   type="button"
                   onClick={() => handleSync("incremental")}
                   disabled={syncing}
-                  className="rounded-[12px] border border-border/50 bg-bg-primary px-3 py-2 text-sm font-medium text-content-primary hover:bg-bg-secondary disabled:opacity-50"
+                  whileHover={{ scale: 1.05, y: -1 }}
+                  whileTap={{ scale: 0.98 }}
+                  className="glass-card border-white/8 hover:border-white/12 px-3 py-2.5 text-sm font-600 text-white rounded-xl transition-all duration-250 disabled:opacity-50"
                 >
-                  Sync
-                </button>
-                <button
+                  {syncing ? "Syncing…" : "Quick Sync"}
+                </motion.button>
+                <motion.button
                   type="button"
                   onClick={() => handleSync("full")}
                   disabled={syncing}
-                  className="rounded-[12px] border border-border/50 bg-bg-primary px-3 py-2 text-sm font-medium text-content-primary hover:bg-bg-secondary disabled:opacity-50"
+                  whileHover={{ scale: 1.05, y: -1 }}
+                  whileTap={{ scale: 0.98 }}
+                  className="glass-card border-white/8 hover:border-white/12 px-3 py-2.5 text-sm font-600 text-white rounded-xl transition-all duration-250 disabled:opacity-50"
                 >
                   Full Sync
-                </button>
-              </div>
+                </motion.button>
+              </motion.div>
             )}
-          </div>
+          </motion.div>
         )}
 
         {error && (
-          <div className="mt-6 rounded-[12px] border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mt-6 glass-card border-status-error/30 bg-status-error/5 p-4 rounded-xl text-sm text-status-error"
+          >
             {error}
-          </div>
+          </motion.div>
         )}
-      </div>
+      </motion.div>
 
-      <aside className="rounded-[12px] border border-border bg-bg-secondary p-6">
-        <div className="space-y-4">
-          <div className="text-xs font-medium uppercase text-content-tertiary">
-            Status
-          </div>
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-content-secondary">Accounts</span>
-              <span className="font-medium text-content-primary">
-                {accounts.length}
-              </span>
-            </div>
-            {failedCount > 0 && (
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-content-secondary">Failed</span>
-                <span className="font-medium text-rose-600">{failedCount}</span>
-              </div>
-            )}
-          </div>
-        </div>
+      {/* Sidebar Stats */}
+      <motion.aside
+        variants={itemVariants}
+        className="glass-card border-white/8 p-6 rounded-2xl h-fit"
+      >
+        <motion.div
+          className="text-xs font-600 text-text-secondary uppercase tracking-wide mb-5"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.3, delay: 0.2 }}
+        >
+          Status
+        </motion.div>
+
+        <motion.div
+          className="space-y-4"
+          variants={containerVariants}
+          initial="hidden"
+          animate="visible"
+        >
+          <motion.div variants={itemVariants} className="flex items-center justify-between p-2 hover:bg-white/4 rounded-lg transition-colors">
+            <span className="text-sm text-text-secondary">Connected</span>
+            <motion.span
+              className="font-display font-600 text-white"
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              transition={{ duration: 0.3, delay: 0.3 }}
+            >
+              {accounts.length}
+            </motion.span>
+          </motion.div>
+
+          {failedCount > 0 && (
+            <motion.div variants={itemVariants} className="flex items-center justify-between p-2 hover:bg-status-error/5 rounded-lg transition-colors">
+              <span className="text-sm text-text-secondary">Failed Items</span>
+              <motion.span
+                className="font-display font-600 text-status-error"
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                transition={{ duration: 0.3, delay: 0.35 }}
+              >
+                {failedCount}
+              </motion.span>
+            </motion.div>
+          )}
+        </motion.div>
 
         {driveDiagnostics && (
           <>
-            <div className="border-t border-border/50 my-4" />
-            <div className="space-y-4">
-              <div className="text-xs font-medium uppercase text-content-tertiary">
+            <motion.div className="border-t border-white/8 my-5" />
+            <motion.div
+              className="space-y-4"
+              variants={containerVariants}
+              initial="hidden"
+              animate="visible"
+            >
+              <motion.div
+                className="text-xs font-600 text-text-secondary uppercase tracking-wide"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.3, delay: 0.2 }}
+              >
                 Queue
-              </div>
-              <div className="space-y-3 text-sm">
-                <div className="flex items-center justify-between">
-                  <span className="text-content-secondary">Pending</span>
-                  <span className="font-medium text-content-primary">
+              </motion.div>
+              <motion.div className="space-y-2 text-sm">
+                <motion.div variants={itemVariants} className="flex items-center justify-between p-2 hover:bg-white/4 rounded-lg transition-colors">
+                  <span className="text-text-secondary">Pending</span>
+                  <motion.span
+                    className="font-display font-600 text-white"
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    transition={{ duration: 0.3, delay: 0.4 }}
+                  >
                     {driveDiagnostics.ingestion.queued}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-content-secondary">Processing</span>
-                  <span className="font-medium text-content-primary">
+                  </motion.span>
+                </motion.div>
+                <motion.div variants={itemVariants} className="flex items-center justify-between p-2 hover:bg-white/4 rounded-lg transition-colors">
+                  <span className="text-text-secondary">Processing</span>
+                  <motion.span
+                    className="font-display font-600 text-white"
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    transition={{ duration: 0.3, delay: 0.45 }}
+                  >
                     {driveDiagnostics.ingestion.processing}
-                  </span>
-                </div>
-              </div>
-            </div>
+                  </motion.span>
+                </motion.div>
+              </motion.div>
+            </motion.div>
           </>
         )}
-      </aside>
-    </section>
+      </motion.aside>
+    </motion.section>
   );
 }
 
