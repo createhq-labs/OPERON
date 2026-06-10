@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import type { Document, ResourceItem, ActivityEvent, User } from "@/core/operon";
 
 export function flagDocument(
