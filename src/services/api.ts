@@ -49,7 +49,7 @@ const productionEnforceSupabase = process.env.NODE_ENV === "production";
 const DATA_HYDRATION_TIMEOUT_MS = 4000;
 let dataProviderMode: DataProviderMode = configuredForSupabase ? "supabase" : productionEnforceSupabase ? "supabase" : "local";
 let supabaseAvailable = false;
-let cacheAvailable = false;
+const cacheAvailable = false;
 const pendingUploadStore: PendingUploadCacheItem[] = [];
 
 if (!configuredForSupabase) {

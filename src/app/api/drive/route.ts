@@ -1,11 +1,22 @@
 import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
+
+import type { DriveDocumentReference, DriveDocumentPermission } from "@/core/operon";
+import { canManageDrive } from "@/security/permissions";
+import {
+  getUsers as getAllUsers,
+  getDriveDocumentById,
+  getDriveDocuments,
+  getDocuments,
+  saveActivity,
+  saveDriveDocumentReference,
+  updateDriveDocumentSyncMetadata,
+} from "@/services/api";
 import {
   buildGoogleDriveAuthUrl,
   buildWebhookCallbackUrl,
   createDriveWatchSubscription,
   deactivateDriveAccount,
-  decryptValue,
   determineParserType,
   encryptValue,
   exchangeGoogleOAuthCode,
@@ -13,7 +24,6 @@ import {
   fetchDriveFileMetadata,
   fetchGoogleDocsDocument,
   fetchGoogleUserInfo,
-  findDriveAccountById,
   findDriveAccounts,
   getCallbackStateCookieName,
   getDriveFolderChildren,
@@ -27,18 +37,7 @@ import {
   getIngestionJobs,
   startIngestionWorker,
 } from "@/services/ingestion";
-import {
-  getUsers as getAllUsers,
-  getDriveDocumentById,
-  getDriveDocuments,
-  getDocuments,
-  saveActivity,
-  saveDriveDocumentReference,
-  updateDriveDocumentSyncMetadata,
-} from "@/services/api";
 import { getSearchIndexVersion } from "@/services/search/sync";
-import type { DriveDocumentReference, DriveDocumentPermission } from "@/core/operon";
-import { canManageDrive } from "@/security/permissions";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -776,9 +775,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const guard = await assertDriveManagementPermission(request, {
       meta: { mode: body.mode as string },
     });
-    if (guard.denied) return guard.response;
+    if (guard.denied === true) return guard.response;
 
-    const { userId } = guard;
+    const userId = guard.userId;
     const mode =
       (body.mode as "manual" | "incremental" | "full") ?? "manual";
     const localMode = !isGoogleDriveAuthConfigured();
@@ -906,9 +905,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const guard = await assertDriveManagementPermission(request, {
       targetId: body.accountId as string,
     });
-    if (guard.denied) return guard.response;
+    if (guard.denied === true) return guard.response;
 
-    const { userId } = guard;
+    const userId = guard.userId;
     const accountId = body.accountId as string | undefined;
     if (!accountId) return buildErrorResponse("Missing accountId", 400);
 

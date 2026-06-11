@@ -109,8 +109,8 @@ export function hasDocumentVisibilityAccess(
   if (item.visibilityScope === "department") {
     if (!userDepartmentId) return false;
     return (
-      item.departmentId === userDepartmentId ||
-      (item.allowedDepartments?.includes(userDepartmentId) ?? false)
+      item.departmentId === (userDepartmentId as DeptId) ||
+      (item.allowedDepartments?.includes(userDepartmentId as DeptId) ?? false)
     );
   }
 

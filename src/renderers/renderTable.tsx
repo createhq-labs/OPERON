@@ -1,14 +1,12 @@
-import type { DocumentBlock } from "@/renderers/types";
+import type { TableBlock } from "@/renderers/types";
 
-interface TableBlockContent {
-  headers: string[];
-  rows: string[][];
-}
-
-export function renderTable(block: DocumentBlock, _index: number) {
-  const tableContent = block.content as TableBlockContent;
-  const headers: string[] = Array.isArray(tableContent?.headers) ? tableContent.headers : [];
-  const rows: string[][] = Array.isArray(tableContent?.rows) ? tableContent.rows : [];
+export function renderTable(block: TableBlock, _index: number) {
+  const headers: string[] = Array.isArray(block.content.headers)
+    ? block.content.headers
+    : [];
+  const rows: string[][] = Array.isArray(block.content.rows)
+    ? block.content.rows
+    : [];
 
   return (
     <div
@@ -51,7 +49,8 @@ export function renderTable(block: DocumentBlock, _index: number) {
             <tr
               key={`row-${rowIndex}`}
               style={{
-                background: rowIndex % 2 === 0 ? "var(--surface)" : "var(--surface-2)",
+                background:
+                  rowIndex % 2 === 0 ? "var(--surface)" : "var(--surface-2)",
               }}
             >
               {row.map((cell, cellIndex) => (
@@ -63,7 +62,9 @@ export function renderTable(block: DocumentBlock, _index: number) {
                     fontSize: "13px",
                     color: "var(--text-2)",
                     borderBottom:
-                      rowIndex < rows.length - 1 ? "1px solid var(--border)" : "none",
+                      rowIndex < rows.length - 1
+                        ? "1px solid var(--border)"
+                        : "none",
                   }}
                 >
                   {cell}

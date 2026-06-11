@@ -48,7 +48,7 @@ export function createVideoBlock(input: {
   id?: string;
 }): VideoBlock {
   return {
-    id: input.id ?? `video-${Date.now()}`,
+    id: input.id ?? `video-${crypto.randomUUID()}`,
     type: "video",
     title: input.title,
     description: input.description,

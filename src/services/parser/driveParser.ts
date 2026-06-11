@@ -1,25 +1,34 @@
 import type { DriveDocumentPayload, ParserResult } from "@/services/parser/types";
 
-function extractParagraphText(element: any) {
+function extractParagraphText(element: { paragraph?: { elements?: Array<{ textRun?: { content?: string } }> } }) {
   if (!element.paragraph) return "";
   return (element.paragraph.elements ?? [])
-    .map((item: any) => item.textRun?.content ?? "")
+    .map((item) => item.textRun?.content ?? "")
     .join("")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-function extractTableContent(table: any) {
-  const headers = table.tableRows[0]?.tableCells?.map((cell: any) => extractParagraphText(cell.content[0] ?? {})) || [];
-  const rows = table.tableRows.slice(1).map((row: any) =>
-    row.tableCells.map((cell: any) => extractParagraphText(cell.content?.[0] ?? {}))
+function extractTableContent(table: {
+  tableRows: Array<{
+    tableCells: Array<{ content: DriveDocumentPayload["body"]["content"] }>;
+  }>;
+}) {
+  const headers =
+    table.tableRows[0]?.tableCells?.map((cell) =>
+      extractParagraphText((cell.content[0] as { paragraph?: { elements?: Array<{ textRun?: { content?: string } }> } }) ?? {})
+    ) ?? [];
+  const rows = table.tableRows.slice(1).map((row) =>
+    row.tableCells.map((cell) =>
+      extractParagraphText((cell.content?.[0] as { paragraph?: { elements?: Array<{ textRun?: { content?: string } }> } }) ?? {})
+    )
   );
   return { headers, rows };
 }
 
 export function parseDriveDocument(document: DriveDocumentPayload): ParserResult {
-  const blocks: any[] = [];
-  const toc: { id: string; label: string; level: 1 | 2 }[] = [];
+  const blocks: ParserResult["blocks"] = [];
+  const toc: ParserResult["toc"] = [];
   let headingIndex = 0;
 
   for (const element of document.body.content ?? []) {
@@ -32,7 +41,7 @@ export function parseDriveDocument(document: DriveDocumentPayload): ParserResult
         const level = element.paragraph.paragraphStyle.namedStyleType === "HEADING_1" ? 1 : 2;
         const id = `heading-${headingIndex}`;
         blocks.push({ type: level === 1 ? "heading" : "subheading", content: text, id });
-        toc.push({ id, label: text, level });
+        toc.push({ id, text, level: level as 1 | 2 | 3 });
         continue;
       }
 
@@ -51,15 +60,26 @@ export function parseDriveDocument(document: DriveDocumentPayload): ParserResult
     }
   }
 
+  const firstParagraph = document.body.content
+    ?.find((element) => element.type === "paragraph" && extractParagraphText(element));
+
+  const description = firstParagraph
+    ? (firstParagraph.paragraph?.elements?.map((item) => item.textRun?.content ?? "").join(" ") ?? "")
+        .slice(0, 200)
+    : "Drive content is linked and pending synchronization.";
+
   return {
     title: document.title,
-    description:
-      document.body.content?.find((element: any) => element.type === "paragraph" && extractParagraphText(element))?.paragraph?.elements
-        ?.map((item: any) => item.textRun?.content ?? "")
-        .join(" ")
-        ?.slice(0, 200) ?? "Drive content is linked and pending synchronization.",
-    blocks: blocks.length > 0 ? blocks : [{ type: "paragraph", content: "Drive document metadata is linked. Content will display once the document is synchronized." }],
+    description,
+    blocks:
+      blocks.length > 0
+        ? blocks
+        : [{ type: "paragraph", content: "Drive document metadata is linked. Content will display once the document is synchronized." }],
     toc,
-    content: document.body.content?.map((element: any) => extractParagraphText(element)).filter(Boolean).join(" ") ?? "",
+    content:
+      document.body.content
+        ?.map((element) => extractParagraphText(element))
+        .filter(Boolean)
+        .join(" ") ?? "",
   };
 }

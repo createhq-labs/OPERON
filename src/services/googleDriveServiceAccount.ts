@@ -10,7 +10,6 @@
  *   GOOGLE_DRIVE_FOLDER_ID        — root folder ID for company files
  */
 
-import crypto from "crypto";
 import jwt from "jsonwebtoken";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -171,7 +170,7 @@ export async function uploadFileToCompanyDrive(
   const accessToken = await getServiceAccountAccessToken();
   const folderId = options?.parentFolderId ?? getDriveFolderId();
 
-  const boundary = "operon_boundary_" + crypto.randomUUID().replace(/-/g, "");
+  const boundary = "operon_boundary_" + globalThis.crypto.randomUUID().replace(/-/g, "");
 
   const metaPart = [
     `--${boundary}`,

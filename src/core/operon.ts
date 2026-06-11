@@ -12,27 +12,6 @@
 //   - Pure helpers only: import from "@/core/helpers"
 // ─────────────────────────────────────────────────────────────────────────────
 
-import * as api from "@/services/api";
-import { parseGoogleDriveDocument } from "@/services/parser";
-import { getParserByExtension, getParserByMimeType } from "@/services/parser/registry";
-import { enqueueIngestionJob, startIngestionWorker } from "@/services/ingestion";
-import { filterActivityForUser } from "@/services/activity";
-import { isVisibleToUser } from "@/security/visibility";
-import {
-  requireAuthenticatedUser,
-  requirePublishingPermission,
-  requireRoleManagementPermission,
-  requireResourceManagementPermission,
-  requireUploadPermission,
-  requireEditingPermission,
-} from "@/security/accessControl";
-import {
-  searchDocuments as searchDocumentsService,
-  searchDriveDocuments as searchDriveDocumentsService,
-  searchResources as searchResourcesService,
-} from "@/services/search";
-import { ROLE_IDS, DEFAULT_ROLE_ID } from "@/core/roles";
-
 // ─── Re-export types (backward compat) ───────────────────────────────────────
 
 export type {
@@ -107,6 +86,7 @@ export { ROLE_IDS, DEFAULT_ROLE_ID, ROLE_SELECTION_OPTIONS } from "@/core/roles"
 export type { RoleSelectionId, RoleSelectionOption } from "@/core/roles";
 
 // Pull in types we use internally in this file
+import { ROLE_IDS, DEFAULT_ROLE_ID } from "@/core/roles";
 import type {
   User,
   Role,
@@ -156,6 +136,25 @@ import {
   generateResourceId,
   generateSnapshotId,
 } from "@/core/helpers";
+
+import * as api from "@/services/api";
+import { parseGoogleDriveDocument } from "@/services/parser";
+import { getParserByExtension, getParserByMimeType } from "@/services/parser/registry";
+import { enqueueIngestionJob, startIngestionWorker } from "@/services/ingestion";
+import { filterActivityForUser } from "@/services/activity";
+import { isVisibleToUser } from "@/security/visibility";
+import {
+  requireAuthenticatedUser,
+  requirePublishingPermission,
+  requireResourceManagementPermission,
+  requireUploadPermission,
+  requireEditingPermission,
+} from "@/security/accessControl";
+import {
+  searchDocuments as searchDocumentsService,
+  searchDriveDocuments as searchDriveDocumentsService,
+  searchResources as searchResourcesService,
+} from "@/services/search";
 
 // ─── Role & Permission Queries ────────────────────────────────────────────────
 
@@ -358,7 +357,7 @@ export function canViewDocument(user: User, document: Document): boolean {
       document.visibilityScope,
       document.departmentId,
       document.allowedUserTypes,
-      document.authorId,
+      document.assignedUserIds,
       document.allowedDepartments,
       document.allowedTeamIds,
     ) &&
@@ -383,7 +382,7 @@ export function canViewDriveDocument(user: User, document: DriveDocumentReferenc
       document.visibilityScope,
       document.departmentId,
       document.allowedUserTypes,
-      document.authorId,
+      document.assignedUserIds,
       document.allowedDepartments,
       document.allowedTeamIds,
     ) &&
@@ -413,7 +412,7 @@ export function canViewResource(user: User, resource: ResourceItem): boolean {
       resource.visibilityScope,
       undefined,
       resource.allowedUserTypes,
-      resource.createdById,
+      undefined,
       resource.allowedDepartments,
       resource.allowedTeamIds,
     ) && roleAllowed && deptAllowed && teamAllowed
@@ -456,7 +455,7 @@ export function getAccessibleVideos(user: User) {
       video.visibilityScope,
       video.allowedDepartments?.[0],
       video.allowedUserTypes,
-      video.createdById,
+      [video.createdById],
     ),
   );
 }
@@ -486,7 +485,12 @@ export async function getParsedDriveDocument(id: string): Promise<DriveParsedDoc
 
   return {
     ...reference,
-    toc:    normalizeTocItems(parsed.toc),
+    toc: normalizeTocItems(
+      parsed.toc.map((item: { id: string; label?: string; text?: string; level: 1 | 2 | 3 }) => ({
+        ...item,
+        label: item.label ?? item.text,
+      }))
+    ),
     blocks: parsed.blocks as unknown as Block[],
   };
 }
@@ -506,7 +510,12 @@ export async function refreshDriveDocumentSync(id: string): Promise<DriveParsedD
 
   return {
     ...reference,
-    toc:    normalizeTocItems(parsed.toc),
+    toc: normalizeTocItems(
+      parsed.toc.map((item: { id: string; label?: string; text?: string; level: 1 | 2 | 3 }) => ({
+        ...item,
+        label: item.label ?? item.text,
+      }))
+    ),
     blocks: parsed.blocks as unknown as Block[],
   };
 }
@@ -1226,7 +1235,6 @@ export function createDriveDocumentReference(input: {
     parsedBlocks:     [],
     parserStatus:     "pending",
     parserVersion:    "1.0",
-    permissionIds:    [],
   };
 
   api.saveDriveDocumentReference(document);

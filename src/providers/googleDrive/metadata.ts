@@ -1,24 +1,33 @@
 import type { NormalizedDocumentSource } from "@/providers/types";
-import { getGoogleDriveClient } from "@/services/googleDriveClient";
+import {
+  fetchDriveFileMetadata,
+  mapGooglePermissions,
+} from "@/services/googleDriveClient";
 
-export async function hydrateGoogleDriveMetadata(documentId: string, accessToken: string): Promise<NormalizedDocumentSource> {
-  const client = getGoogleDriveClient(accessToken);
-  const file = await client.files.get({
-    fileId: documentId,
-    fields: "id,name,description,mimeType,createdTime,modifiedTime,webViewLink,size,owners",
-  });
-
-  const { id, name, description, mimeType, createdTime, modifiedTime, webViewLink } = file.data;
+/**
+ * Fetches live metadata for a Google Drive file and normalises it into
+ * the provider-agnostic NormalizedDocumentSource shape.
+ *
+ * @param documentId  The Google Drive file ID.
+ * @param accessToken A valid OAuth or service-account access token.
+ */
+export async function hydrateGoogleDriveMetadata(
+  documentId: string,
+  accessToken: string
+): Promise<NormalizedDocumentSource> {
+  const file = await fetchDriveFileMetadata(accessToken, documentId);
 
   return {
-    id: (id as string | undefined) ?? documentId,
-    provider: "googleDrive",
+    id: file.id,
     sourceType: "google_drive",
-    title: (name as string | undefined) ?? "Untitled",
-    description: (description as string | undefined) ?? "",
-    rawUrl: (webViewLink as string | undefined) ?? `https://drive.google.com/file/d/${documentId}/view`,
-    mimeType: (mimeType as string | undefined) ?? "application/octet-stream",
-    createdAt: (createdTime as string | undefined) ?? new Date().toISOString(),
-    updatedAt: (modifiedTime as string | undefined) ?? new Date().toISOString(),
+    title: file.name,
+    description: file.description ?? "",
+    rawUrl: file.webViewLink ?? "",
+    mimeType: file.mimeType,
+    driveFileId: file.id,
+    driveModifiedAt: file.modifiedTime,
+    permissionSummary: mapGooglePermissions(
+      file.permissions as Array<{ role?: string; emailAddress?: string; domain?: string }> | undefined
+    ),
   };
 }

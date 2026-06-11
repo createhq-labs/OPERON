@@ -24,10 +24,12 @@ export function parseGoogleDocsDocument(document: DriveDocumentPayload): ParserR
     if (node.type === "paragraph" && node.paragraph) {
       const paragraphText = node.paragraph.elements?.map((element) => element.textRun?.content ?? "").join("")?.trim();
       if (paragraphText) {
-        blocks.push({
-          type: paragraphText.startsWith("#") ? "heading" : "paragraph",
-          content: paragraphText,
-        });
+        if (paragraphText.startsWith("#")) {
+          const headingText = paragraphText.replace(/^#+\s*/, "");
+          blocks.push({ type: "heading", id: headingText.toLowerCase().replace(/\s+/g, "-"), content: paragraphText });
+        } else {
+          blocks.push({ type: "paragraph", content: paragraphText });
+        }
       }
     }
 

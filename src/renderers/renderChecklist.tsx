@@ -1,12 +1,8 @@
-import type { DocumentBlock } from "@/renderers/types";
+import type { ChecklistBlock } from "@/renderers/types";
 
-interface ChecklistContent {
-  title?: string;
-  items: Array<{ id: string; label: string }>;
-}
+export function renderChecklist(block: ChecklistBlock, _index: number) {
+  const { title, items } = block.content;
 
-export function renderChecklist(block: DocumentBlock, _index: number) {
-  const content = block.content as ChecklistContent;
   return (
     <div
       style={{
@@ -16,11 +12,20 @@ export function renderChecklist(block: DocumentBlock, _index: number) {
         padding: "20px",
       }}
     >
-      <div style={{ fontSize: "var(--text-13)", fontWeight: 600, color: "var(--text)", marginBottom: "12px" }}>
-        {content.title}
-      </div>
+      {title && (
+        <div
+          style={{
+            fontSize: "var(--text-13)",
+            fontWeight: 600,
+            color: "var(--text)",
+            marginBottom: "12px",
+          }}
+        >
+          {title}
+        </div>
+      )}
       <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-        {content.items.map((item) => (
+        {items.map((item) => (
           <div
             key={item.id}
             style={{

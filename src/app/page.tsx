@@ -1,21 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { DriveDiagnostics } from "@/services/drive";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useRouter } from "next/navigation";
+
+import type { DriveDiagnostics } from "@/services/drive";
 import type {
   DeptId, DocTag, Document, DriveParsedDocument, ResourceCategory,
   Role, RoleId, User, UserType, VisibilityScope,
 } from "@/core/operon";
-import {
-  getProviderHealth, setDataProviderMode, subscribeToDataUpdates, onSupabaseHydrated,
-} from "@/services/api";
-import { renderBlock } from "@/renderers";
-import { useSession } from "@/auth/useSession";
-import { MVPAccessMode } from "@/features/auth/MVPAccessMode";
-import { HomePanel } from "@/features/dashboard/HomePanel";
-import { Sidebar } from "@/components/Sidebar";
 import {
   canAddDocuments, isAdmin, saveRole, canDeleteRole, canEditRole,
   canManageResources, canManageRoles, canManageUsers, canPublishGlobally,
@@ -26,6 +19,14 @@ import {
   getSupervisors, getTeams, getUserById, getAssignableDepartments,
   getDocumentEntity, searchDocuments, searchResources,
 } from "@/core/operon";
+import {
+  getProviderHealth, setDataProviderMode, subscribeToDataUpdates, onSupabaseHydrated,
+} from "@/services/api";
+import { renderBlock } from "@/renderers";
+import { useSession } from "@/auth/useSession";
+import { MVPAccessMode } from "@/features/auth/MVPAccessMode";
+import { HomePanel } from "@/features/dashboard/HomePanel";
+import { Sidebar } from "@/components/Sidebar";
 
 // ─── Shared inline-style helpers (design system tokens) ──────────────────────
 
@@ -271,7 +272,7 @@ export default function Page() {
   const [resourceTitle,            setResourceTitle]            = useState("");
   const [resourceHref,             setResourceHref]             = useState("");
   const [resourceAllowedRoleIds,   setResourceAllowedRoleIds]   = useState<RoleId[]>(["role_cofounder","role_hr","role_finance","role_im_team_lead","role_tm_team_lead"]);
-  const [resourceAllowedUserTypes, setResourceAllowedUserTypes] = useState<UserType[]>(["employee"]);
+  const [resourceAllowedUserTypes, _setResourceAllowedUserTypes] = useState<UserType[]>(["employee"]);
   const [resourceAllowedDepartments, setResourceAllowedDepartments] = useState<DeptId[]>([]);
   const [resourceAllowedTeamIds,   setResourceAllowedTeamIds]   = useState<string[]>([]);
   const [resourceVisibility,       setResourceVisibility]       = useState<VisibilityScope>("private");
@@ -280,9 +281,9 @@ export default function Page() {
   // ── Drive & data ─────────────────────────────────────────────────────────
   const [dataVersion,     setDataVersion]     = useState(0);
   const [providerLoading, setProviderLoading] = useState(true);
-  const [providerReady,   setProviderReady]   = useState(false);
-  const [providerHealth,  setProviderHealth]  = useState(getProviderHealth());
-  const [driveDiagnostics, setDriveDiagnostics] = useState<DriveDiagnostics | null>(null);
+  const [_providerReady,   setProviderReady]   = useState(false);
+  const [_providerHealth,  setProviderHealth]  = useState(getProviderHealth());
+  const [driveDiagnostics, _setDriveDiagnostics] = useState<DriveDiagnostics | null>(null);
   const [cachedQuickActions, setCachedQuickActions] = useState<Array<{ id: string; label: string; description: string; category?: string }>>([]);
 
   // ── Team / users ─────────────────────────────────────────────────────────
@@ -381,9 +382,9 @@ export default function Page() {
   // ─── Derived data ─────────────────────────────────────────────────────────
   const pinnedDocs     = useMemo(() => (user ? getPinnedDocuments(user, 3) : []),               [user]);
   const accessibleDocs = useMemo(() => (user ? getAccessibleDocuments(user) : []),              [user]);
-  const availableUsers = useMemo(() => (user && isAdmin(user) ? getAllUsers() : []),            [user]);
+  const _availableUsers = useMemo(() => (user && isAdmin(user) ? getAllUsers() : []),            [user]);
   const supervisors    = useMemo(() => (user ? getSupervisors(user) : []),                      [user]);
-  const teams          = useMemo(() => (user ? getTeams() : []),                                [user]);
+  const _teams          = useMemo(() => (user ? getTeams() : []),                                [user]);
   const creatableRoles = useMemo(() => (user ? getCreatableRoles(user) : []),                   [user]);
   const uploadRoles    = creatableRoles;
   const activityFeed   = useMemo(() => (user ? getActivityFeed(user) : []),                     [user]);
@@ -395,11 +396,11 @@ export default function Page() {
     if (libraryCategory === "all") return results;
     const cat = LIBRARY_CATEGORIES.find((c) => c.id === libraryCategory);
     return cat ? results.filter((doc) => cat.tags.includes(doc.tag)) : results;
-  }, [user, librarySearch, libraryDept, libraryCategory, dataVersion]);
+  }, [user, librarySearch, libraryDept, libraryCategory]);
 
   const resourceItems = useMemo(
     () => (user && canViewResources(user) ? searchResources(user, resourceQuery, resourceCategory === "all" ? undefined : resourceCategory) : []),
-    [user, resourceQuery, resourceCategory, dataVersion],
+    [user, resourceQuery, resourceCategory],
   );
 
   const globalSearchResults = useMemo(() => {

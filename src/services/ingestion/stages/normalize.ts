@@ -21,8 +21,8 @@ export function normalizeParsedDocument(parsed: ParserResult): NormalizedDocumen
   const toc = parsed.toc && parsed.toc.length > 0
     ? parsed.toc
     : blocks
-        .filter((block) => block.type === "heading" || block.type === "subheading")
-        .map((block, index) => ({ id: block.id || `heading-${index + 1}`, label: String(block.content), level: (block.type === "heading" ? 1 : 2) as 1 | 2 }));
+    .filter((block) => block.type === "heading" || block.type === "subheading")
+    .map((block, index) => ({ id: block.id || `heading-${index + 1}`, text: String(block.content), level: (block.type === "heading" ? 1 : 2) as 1 | 2 | 3 }));
 
   const searchableText = blocks.map((block) => block.searchableText || "").join(" ").trim();
 

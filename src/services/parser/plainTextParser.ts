@@ -4,9 +4,9 @@ const slugify = (value: string) =>
   value
     .toLowerCase()
     .replace(/[\s]+/g, "-")
-    .replace(/[^a-z0-9\-]/g, "")
-    .replace(/\-+/g, "-")
-    .replace(/^\-+|\-+$/g, "");
+    .replace(/[^a-z0-9-]/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
 
 export function parsePlainTextDocument(rawText: string, fileName: string): ParserResult {
   const content = rawText
@@ -72,13 +72,9 @@ export function parsePlainTextDocument(rawText: string, fileName: string): Parse
   };
 
   const isLikelyHeading = (line: string) => {
-    if (/^[A-Z][A-Za-z\s\-\/:]{3,}\s*$/.test(line) && line === line.toUpperCase()) {
-      return true;
-    }
-    if (/^([A-Z][a-z]+\s?){2,}$/.test(line) && line.endsWith(":")) {
-      return true;
-    }
-    return /^[A-Z][A-Za-z\s]{3,}\:?$/.test(line);
+    if (/^[A-Z][A-Za-z\s\-/:]{3,}\s*$/.test(line) && line === line.toUpperCase()) return true;
+    if (/^([A-Z][a-z]+\s?){2,}$/.test(line) && line.endsWith(":")) return true;
+    return /^[A-Z][A-Za-z\s]{3,}:?$/.test(line);
   };
 
   for (const rawLine of lines) {
@@ -92,7 +88,12 @@ export function parsePlainTextDocument(rawText: string, fileName: string): Parse
     if (heading) {
       flushAll();
       const id = slugify(heading.text);
-      blocks.push({ type: heading.level === 1 ? "heading" : "subheading", content: heading.text, id, metadata: { importance: "high" } });
+      blocks.push({
+        type: heading.level === 1 ? "heading" : "subheading",
+        content: heading.text,
+        id,
+        metadata: { importance: "high" },
+      });
       continue;
     }
 
@@ -111,7 +112,7 @@ export function parsePlainTextDocument(rawText: string, fileName: string): Parse
       continue;
     }
 
-    const noteMatch = line.match(/^(NOTE|IMPORTANT|TIP|WARNING|CAUTION)[:\-]\s*(.*)$/i);
+    const noteMatch = line.match(/^(NOTE|IMPORTANT|TIP|WARNING|CAUTION)[:-]\s*(.*)$/i);
     if (noteMatch) {
       flushAll();
       blocks.push({ type: "note", content: noteMatch[2].trim(), id: slugify(noteMatch[2].trim()) });
@@ -132,7 +133,11 @@ export function parsePlainTextDocument(rawText: string, fileName: string): Parse
 
     if (isLikelyHeading(line)) {
       flushAll();
-      blocks.push({ type: "heading", content: line.replace(/[:\-]+$/, "").trim(), id: slugify(line) });
+      blocks.push({
+        type: "heading",
+        content: line.replace(/[:-]+$/, "").trim(),
+        id: slugify(line),
+      });
       continue;
     }
 
@@ -145,16 +150,16 @@ export function parsePlainTextDocument(rawText: string, fileName: string): Parse
     blocks.push({ type: "paragraph", content: "No content could be extracted from this file." });
   }
 
-  const toc = blocks
+  const toc: ParserResult["toc"] = blocks
     .filter((block) => block.type === "heading" || block.type === "subheading")
     .map((block) => ({
       id: block.id ?? slugify(String(block.content)),
-      label: String(block.content),
-      level: (block.type === "heading" ? 1 : 2) as 1 | 2,
+      text: String(block.content),
+      level: (block.type === "heading" ? 1 : 2) as 1 | 2 | 3,
     }));
 
-  const title = toc.length > 0 ? toc[0].label : fileName.replace(/\.[^/.]+$/, "");
-  const description = blocks.find((block) => block.type === "paragraph")?.content ?? "";
+  const title = toc.length > 0 ? toc[0].text : fileName.replace(/\.[^/.]+$/, "");
+  const description = String(blocks.find((block) => block.type === "paragraph")?.content ?? "");
 
   return { title, description, blocks, toc, content };
 }

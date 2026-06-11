@@ -19,7 +19,7 @@ export interface NormalizedDocumentSource {
   id: string;
 
   /** Which provider produced this source record */
-  provider: ProviderType;
+  provider?: ProviderType;
 
   /** How the document entered the system */
   sourceType: DocumentSourceType;
@@ -33,11 +33,11 @@ export interface NormalizedDocumentSource {
   /** Publicly accessible URL for viewing the document */
   rawUrl: string;
 
-  /** MIME type of the file (e.g. "application/pdf", "application/vnd.google-apps.document") */
+  /** MIME type of the file */
   mimeType: string;
 
   /** ISO 8601 timestamp of when the document was created in the source system */
-  createdAt: string;
+  createdAt?: string;
 
   /** ISO 8601 timestamp of the last modification in the source system */
   updatedAt?: string;
@@ -50,4 +50,22 @@ export interface NormalizedDocumentSource {
 
   /** Supabase storage path within the bucket — present for locally uploaded files */
   storagePath?: string;
+
+  // ── Google Drive fields ────────────────────────────────────────────────────
+
+  /** ISO 8601 timestamp of when this metadata was last synced from Drive */
+  syncedAt?: string;
+
+  /** Google Drive file ID */
+  driveFileId?: string;
+
+  /** ISO 8601 timestamp of the last modification recorded in Google Drive */
+  driveModifiedAt?: string;
+
+  /** Summarised permission entries from the Drive API */
+  permissionSummary?: Array<{
+    role?: string;
+    emailAddress?: string;
+    domain?: string;
+  }>;
 }

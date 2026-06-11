@@ -267,6 +267,7 @@ export type BlockType =
 export interface BaseBlock {
   type: BlockType;
   id?:  string;
+  content?: string;
 }
 
 export interface HeadingBlock extends BaseBlock {

@@ -20,7 +20,9 @@ export type DocumentBlockType =
   | "financial_entry"
   | "announcement"
   | "onboarding_step"
-  | "divider";
+  | "divider"
+  | "image"
+  | "list_item";
 
 export interface SemanticChunk {
   id: string;
@@ -48,10 +50,9 @@ export interface ParsedMetadata {
   [key: string]: unknown;
 }
 
-export interface DocumentBlock {
+interface BaseDocumentBlock {
   id?: string;
   type: DocumentBlockType;
-  content: any;
   parentId?: string;
   sectionId?: string;
   semanticChunkId?: string;
@@ -70,11 +71,68 @@ export interface DocumentBlock {
   };
 }
 
+export interface HeadingBlock extends BaseDocumentBlock {
+  type: "heading" | "subheading";
+  id: string;
+  content: string;
+}
+
+export interface ParagraphBlock extends BaseDocumentBlock {
+  type: "paragraph";
+  content: string;
+}
+
+export interface CodeBlock extends BaseDocumentBlock {
+  type: "code";
+  content: string;
+}
+
+export interface TableBlock extends BaseDocumentBlock {
+  type: "table";
+  content: {
+    rows: string[][];
+    headers?: string[];
+  };
+}
+
+export interface StepsBlock extends BaseDocumentBlock {
+  type: "steps";
+  content: Array<{ title: string; description: string }>;
+}
+
+export interface ImageBlock extends BaseDocumentBlock {
+  type: "image";
+  content: { src: string; alt?: string };
+}
+
+export interface ListItemBlock extends BaseDocumentBlock {
+  type: "list_item";
+  content: string;
+}
+
+export interface GenericTextBlock extends BaseDocumentBlock {
+  type: Exclude<
+    DocumentBlockType,
+    "heading" | "subheading" | "paragraph" | "code" | "table" | "steps" | "image" | "list_item"
+  >;
+  content: string | Array<{ title?: string; description?: string; question?: string; answer?: string; id?: string; label?: string; checked?: boolean }> | Record<string, unknown>;
+}
+
+export type DocumentBlock =
+  | HeadingBlock
+  | ParagraphBlock
+  | CodeBlock
+  | TableBlock
+  | StepsBlock
+  | ImageBlock
+  | ListItemBlock
+  | GenericTextBlock;
+
 export interface ParserResult {
   title: string;
   description: string;
   blocks: DocumentBlock[];
-  toc: { id: string; label: string; level: 1 | 2 | 3 }[];
+  toc: { id: string; text: string; level: 1 | 2 | 3 }[];
   content: string;
   warnings?: string[];
   confidence?: number;
@@ -95,7 +153,9 @@ export interface DriveDocumentPayload {
         bullet?: { listId?: string; glyphType?: string };
       };
       table?: {
-        tableRows: Array<{ tableCells: Array<{ content: DriveDocumentPayload['body']['content'] }> }>;
+        tableRows: Array<{
+          tableCells: Array<{ content: DriveDocumentPayload["body"]["content"] }>;
+        }>;
       };
       image?: { contentUri?: string; altText?: string };
     }>;

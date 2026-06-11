@@ -1,6 +1,9 @@
-import type { DocumentBlock } from "@/renderers/types";
+import type { AlertBlock } from "@/renderers/types";
 
-const ALERT_STYLES: Record<string, { border: string; bg: string; label: string; labelColor: string }> = {
+const ALERT_STYLES: Record<
+  string,
+  { border: string; bg: string; label: string; labelColor: string }
+> = {
   warning: {
     border: "rgba(245, 166, 35, 0.3)",
     bg: "rgba(245, 166, 35, 0.08)",
@@ -27,11 +30,9 @@ const ALERT_STYLES: Record<string, { border: string; bg: string; label: string; 
   },
 };
 
-export function renderAlert(block: DocumentBlock, index: number) {
-  const blockType = block.type as string;
-  const styles = ALERT_STYLES[blockType] ?? ALERT_STYLES.note;
-  const blockContent = block as { title?: string };
-  const displayTitle = blockContent.title ?? styles.label;
+export function renderAlert(block: AlertBlock, _index: number) {
+  const styles = ALERT_STYLES[block.type] ?? ALERT_STYLES.note;
+  const displayTitle = block.title ?? styles.label;
 
   return (
     <div
@@ -63,7 +64,7 @@ export function renderAlert(block: DocumentBlock, index: number) {
           color: "var(--text-2)",
         }}
       >
-        {block.content as string}
+        {block.content}
       </p>
     </div>
   );

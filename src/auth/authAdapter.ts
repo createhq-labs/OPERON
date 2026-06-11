@@ -1,6 +1,6 @@
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { withTimeout } from "@/lib/async";
-import type { User } from "@/core/types";
+import type { User, UserType, DeptId, PermissionId, UserStatus } from "@/core/types";
 import { ROLE_IDS } from "@/core/roles";
 import { logRuntimeWarning } from "@/services/observability/runtimeLogger";
 
@@ -104,15 +104,16 @@ export class SupabaseAuthAdapter implements AuthAdapter {
       email: normalizeEmail(row.email as string | undefined),
       avatar:
         coerceString(row.avatar) || coerceString(row.avatar_url),
-      userType: coerceString(row.user_type, "employee"),
+      userType: coerceString(row.user_type, "employee") as UserType,
       roleId:
         coerceString(row.role_legacy_id) ||
         coerceString(row.roleId) ||
         ROLE_IDS.EMPLOYEE,
-      departmentId:
-        coerceString(row.department_legacy_id) ||
-        coerceString(row.departmentId) ||
-        undefined,
+      departmentId: (
+         coerceString(row.department_legacy_id) ||
+         coerceString(row.departmentId) ||
+         undefined
+        ) as DeptId | undefined,
       teamId:
         coerceString(row.team_legacy_id) ||
         coerceString(row.teamId) ||
@@ -121,9 +122,9 @@ export class SupabaseAuthAdapter implements AuthAdapter {
         coerceString(row.supervisor_legacy_id) ||
         coerceString(row.supervisorId) ||
         undefined,
-      permissionIds: coerceStringArray(row.permission_ids),
+      permissionIds: coerceStringArray(row.permission_ids) as PermissionId[],
       createdById: coerceString(row.created_by_id),
-      status: coerceString(row.status, "active"),
+      status: coerceString(row.status, "active") as UserStatus,
     };
   }
 

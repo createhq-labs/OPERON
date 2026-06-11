@@ -28,6 +28,7 @@ export function parseMarkdownDocument(rawMarkdown: string, fileName: string): Pa
       blocks.push({
         type: level === 1 ? "heading" : level <= 3 ? "subheading" : "paragraph",
         content: headingMatch[2].trim(),
+        id: headingMatch[2].trim().toLowerCase().replace(/[^a-z0-9]+/g, "-"),
       });
       continue;
     }
@@ -35,7 +36,19 @@ export function parseMarkdownDocument(rawMarkdown: string, fileName: string): Pa
     const checklistMatch = line.match(/^[-*+]\s*\[( |x|X)\]\s+(.*)$/);
     if (checklistMatch) {
       flushParagraph();
-      blocks.push({ type: "checklist", content: { title: "Checklist", items: [{ id: checklistMatch[2].trim().toLowerCase().replace(/[^a-z0-9]+/gi, "-"), label: checklistMatch[2].trim(), checked: checklistMatch[1].toLowerCase() === "x" }] } });
+      blocks.push({
+        type: "checklist",
+        content: {
+          title: "Checklist",
+          items: [
+            {
+              id: checklistMatch[2].trim().toLowerCase().replace(/[^a-z0-9]+/gi, "-"),
+              label: checklistMatch[2].trim(),
+              checked: checklistMatch[1].toLowerCase() === "x",
+            },
+          ],
+        },
+      });
       continue;
     }
 
@@ -58,10 +71,9 @@ export function parseMarkdownDocument(rawMarkdown: string, fileName: string): Pa
       continue;
     }
 
-    const isTableRow = line.includes("|");
-    if (isTableRow) {
+    if (line.includes("|")) {
       flushParagraph();
-      const columns = line.split("|").map((value) => value.trim()).filter(Boolean);
+      const columns = line.split("|").map((v) => v.trim()).filter(Boolean);
       blocks.push({ type: "table", content: { rows: [columns] } });
       continue;
     }
@@ -81,13 +93,19 @@ export function parseMarkdownDocument(rawMarkdown: string, fileName: string): Pa
     .replace(/\s+/g, " ")
     .trim();
 
+  const toc: ParserResult["toc"] = blocks
+    .filter((block) => block.type === "heading" || block.type === "subheading")
+    .map((block, index) => ({
+      id: block.id ?? `heading-${index + 1}`,
+      text: String(block.content),
+      level: (block.type === "heading" ? 1 : 2) as 1 | 2 | 3,
+    }));
+
   return {
     title: fileName.replace(/\.[^/.]+$/, ""),
     description: content.split(" ").slice(0, 40).join(" "),
     blocks,
-    toc: blocks
-      .filter((block) => block.type === "heading" || block.type === "subheading")
-      .map((block, index) => ({ id: block.id ?? `heading-${index + 1}`, label: String(block.content), level: block.type === "heading" ? 1 : 2 })),
+    toc,
     content,
     warnings: [],
     confidence: 0.8,

@@ -2,32 +2,28 @@
 
 import {
   createContext,
-  useCallback,
   useContext,
   useEffect,
   useRef,
   useState,
   type PropsWithChildren,
 } from "react";
-import type { User } from "@/core/types";
+import type { User } from "@/core/operon";
 import { getRoleById } from "@/core/operon";
 import { resolveSessionUser } from "@/auth/sessionResolver";
 import { authAdapter } from "@/auth/authAdapter";
-import { getSupabaseDiagnostics } from "@/lib/supabase";
-import { ROLE_IDS, DEFAULT_ROLE_ID } from "@/core/roles";
+import { getSupabaseDiagnostics, resolveSupabaseAvailability } from "@/lib/supabase";
+import { DEFAULT_ROLE_ID } from "@/core/roles";
 import {
   logRuntimeError,
   logRuntimeEvent,
   logRuntimeWarning,
 } from "@/services/observability/runtimeLogger";
+import { recordRuntimeMetric } from "@/services/observability/runtimeMetrics";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type AuthStatus =
-  | "initializing"
-  | "authenticated"
-  | "unauthenticated"
-  | "failed";
+type AuthStatus = "initializing" | "authenticated" | "unauthenticated" | "failed";
 
 export interface AuthState {
   user: User | null;
@@ -58,7 +54,7 @@ function writeStorage(key: string, value: string): void {
   try {
     window.localStorage.setItem(key, value);
   } catch {
-    // Restricted environment (e.g. private browsing with storage blocked).
+    // Restricted environment — silently ignore.
   }
 }
 
@@ -67,17 +63,15 @@ function clearStorage(...keys: string[]): void {
   try {
     keys.forEach((k) => window.localStorage.removeItem(k));
   } catch {
-    // Silently ignore.
+    // Restricted environment — silently ignore.
   }
 }
 
 // ─── Local User Factory ───────────────────────────────────────────────────────
 
 /**
- * Produces a synthetic User for MVP / demo mode.
- * This user is never persisted to Supabase and carries no auth token.
- * The role ID is validated against the role registry — an unknown ID
- * falls back to DEFAULT_ROLE_ID so permissions never escalate unexpectedly.
+ * Creates a synthetic User for MVP / demo mode when no real session exists.
+ * The user is local-only and never persisted to Supabase.
  */
 function createLocalUser(roleId: string, displayRoleName?: string): User {
   const role = getRoleById(roleId) ?? getRoleById(DEFAULT_ROLE_ID);
@@ -121,12 +115,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [error, setError] = useState<string | undefined>(undefined);
 
   const mountedRef = useRef(true);
-
-  // ─── Bootstrap ─────────────────────────────────────────────────────────────
-  // Subscription is registered separately from the hydration effect so that
-  // auth events that arrive while hydration is in-flight don't overwrite
-  // partially-resolved state. The subscription only applies updates after
-  // `loaded` transitions to true.
+  const subscriptionRef = useRef<{ unsubscribe: () => void } | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -134,58 +123,64 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
     async function hydrate() {
       const diagnostics = getSupabaseDiagnostics();
-      const currentUser = await resolveSessionUser();
+
+      const [sessionResult, availabilityResult] = await Promise.allSettled([
+        resolveSessionUser(),
+        resolveSupabaseAvailability(3000),
+      ]);
 
       if (!mountedRef.current) return;
 
-      let activeUser: User;
-      let resolvedStatus: AuthStatus;
+      const currentUser =
+        sessionResult.status === "fulfilled" ? sessionResult.value : null;
 
-      if (currentUser) {
-        activeUser = currentUser;
-        resolvedStatus = "authenticated";
-      } else if (diagnostics.configured) {
-        // Supabase is configured but no session — user needs to sign in.
-        const localRoleId = readStorage(ROLE_KEY);
-        const localRoleLabel = readStorage(ROLE_LABEL_KEY);
+      const availability =
+        availabilityResult.status === "fulfilled"
+          ? availabilityResult.value
+          : { available: false, reason: "Auth health check failed.", diagnostics };
 
-        const validRoleId =
-          localRoleId && getRoleById(localRoleId)
-            ? localRoleId
-            : DEFAULT_ROLE_ID;
+      // If no real session, fall back to a persisted local role (MVP mode).
+      const localRoleId = currentUser ? null : readStorage(ROLE_KEY);
+      const localRoleLabel = currentUser ? null : readStorage(ROLE_LABEL_KEY);
 
-        // Correct any stale persisted role.
-        if (localRoleId && validRoleId !== localRoleId) {
-          writeStorage(ROLE_KEY, validRoleId);
-        }
+      const resolvedRoleId =
+        localRoleId && getRoleById(localRoleId) ? localRoleId : DEFAULT_ROLE_ID;
 
-        if (localRoleId) {
-          // MVP mode: persisted role selection acts as a local session.
-          activeUser = createLocalUser(validRoleId, localRoleLabel ?? undefined);
-          resolvedStatus = "authenticated";
-        } else {
-          // No real session, no local role — unauthenticated.
-          activeUser = createLocalUser(DEFAULT_ROLE_ID);
-          resolvedStatus = "unauthenticated";
-        }
-      } else {
-        // Supabase not configured — fall back to local role.
-        const localRoleId = readStorage(ROLE_KEY) ?? DEFAULT_ROLE_ID;
-        const localRoleLabel = readStorage(ROLE_LABEL_KEY);
-        activeUser = createLocalUser(localRoleId, localRoleLabel ?? undefined);
-        resolvedStatus = "authenticated";
+      // Correct any stale role id that no longer maps to a valid role.
+      if (localRoleId && resolvedRoleId !== localRoleId) {
+        writeStorage(ROLE_KEY, resolvedRoleId);
       }
+
+      const activeUser =
+        currentUser ?? createLocalUser(resolvedRoleId, localRoleLabel ?? undefined);
+
+      const resolvedStatus: AuthStatus = activeUser
+        ? "authenticated"
+        : diagnostics.configured
+        ? "unauthenticated"
+        : "failed";
 
       if (!mountedRef.current) return;
 
       setUser(activeUser);
       setStatus(resolvedStatus);
+      setError(activeUser ? undefined : availability.reason);
       setLoaded(true);
+
+      recordRuntimeMetric(
+        "auth_bootstrap_duration_ms",
+        Math.max(0, performance.now() - startTime),
+        {
+          status: resolvedStatus,
+          configured: diagnostics.configured,
+          available: availability.available,
+        }
+      );
 
       logRuntimeEvent("Auth bootstrap completed", {
         status: resolvedStatus,
-        configured: diagnostics.configured,
-        durationMs: Math.round(performance.now() - startTime),
+        available: availability.available,
+        reason: availability.reason,
       });
     }
 
@@ -198,17 +193,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       logRuntimeError("Auth bootstrap failed", { error: message });
     });
 
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  // ─── Auth State Subscription ────────────────────────────────────────────────
-  // Registered once. Only processes events after the initial hydration
-  // has completed (`loaded` is true before any of these events matter).
-
-  useEffect(() => {
-    const subscription = authAdapter.onAuthStateChange(async (event) => {
+    subscriptionRef.current = authAdapter.onAuthStateChange(async (event) => {
       if (!mountedRef.current) return;
 
       try {
@@ -217,12 +202,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
           event === "TOKEN_REFRESHED" ||
           event === "USER_UPDATED"
         ) {
-          const refreshed = await resolveSessionUser();
+          const currentUser = await resolveSessionUser();
           if (!mountedRef.current) return;
-          setUser(refreshed);
-          setStatus(refreshed ? "authenticated" : "unauthenticated");
+          setUser(currentUser);
+          setStatus(currentUser ? "authenticated" : "unauthenticated");
           setError(undefined);
-        } else if (event === "SIGNED_OUT") {
+        }
+
+        if (event === "SIGNED_OUT") {
           setUser(null);
           setStatus("unauthenticated");
           setError(undefined);
@@ -235,21 +222,27 @@ export function AuthProvider({ children }: PropsWithChildren) {
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mountedRef.current = false;
+      subscriptionRef.current?.unsubscribe();
+    };
   }, []);
 
-  // ─── Actions ───────────────────────────────────────────────────────────────
-
-  const signIn = useCallback(async () => {
-    clearStorage(ROLE_KEY, ROLE_LABEL_KEY);
-    await authAdapter.signIn();
-    // signIn initiates an OAuth redirect — state updates arrive via the
-    // auth subscription when the session is established.
-  }, []);
-
-  const signOut = useCallback(async () => {
-    clearStorage(ROLE_KEY, ROLE_LABEL_KEY);
+  async function signIn() {
     try {
+      clearStorage(ROLE_KEY, ROLE_LABEL_KEY);
+      await authAdapter.signIn();
+    } catch (err) {
+      logRuntimeError("Sign in failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
+  }
+
+  async function signOut() {
+    try {
+      clearStorage(ROLE_KEY, ROLE_LABEL_KEY);
       await authAdapter.signOut();
     } finally {
       if (mountedRef.current) {
@@ -258,26 +251,22 @@ export function AuthProvider({ children }: PropsWithChildren) {
         setError(undefined);
       }
     }
-  }, []);
+  }
 
-  const selectRole = useCallback(
-    (roleId: string, displayRoleName?: string): void => {
-      if (!mountedRef.current) return;
+  function selectRole(roleId: string, displayRoleName?: string): void {
+    if (!mountedRef.current) return;
 
-      const role = getRoleById(roleId) ?? getRoleById(DEFAULT_ROLE_ID);
-      const resolvedRoleId = role?.id ?? DEFAULT_ROLE_ID;
-      const resolvedDisplayName =
-        displayRoleName ?? role?.name ?? "Employee";
+    const role = getRoleById(roleId) ?? getRoleById(DEFAULT_ROLE_ID);
+    const resolvedRoleId = role?.id ?? DEFAULT_ROLE_ID;
+    const resolvedDisplayName = displayRoleName ?? role?.name ?? "Employee";
 
-      writeStorage(ROLE_KEY, resolvedRoleId);
-      writeStorage(ROLE_LABEL_KEY, resolvedDisplayName);
+    writeStorage(ROLE_KEY, resolvedRoleId);
+    writeStorage(ROLE_LABEL_KEY, resolvedDisplayName);
 
-      setUser(createLocalUser(resolvedRoleId, resolvedDisplayName));
-      setStatus("authenticated");
-      setError(undefined);
-    },
-    []
-  );
+    setUser(createLocalUser(resolvedRoleId, resolvedDisplayName));
+    setStatus("authenticated");
+    setError(undefined);
+  }
 
   return (
     <AuthContext.Provider
@@ -290,6 +279,6 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
-export function useAuth(): AuthState {
+export function useAuth() {
   return useContext(AuthContext);
 }

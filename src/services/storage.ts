@@ -1,4 +1,5 @@
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import { logWarning } from "@/services/logger";
 export type { StorageProvider } from "@/services/storage/provider";
 export { createSupabaseStorageProvider } from "@/services/storage/supabaseProvider";
 
@@ -108,7 +109,7 @@ export async function createSecurePreviewUrl(
 
   const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, expiresInSeconds);
   if (error || !data?.signedUrl) {
-    console.warn("Unable to create secure preview URL", { bucket, path, error });
+    logWarning("Unable to create secure preview URL", { bucket, path, error });
     return undefined;
   }
 
@@ -125,12 +126,12 @@ export async function uploadFileToStorage(
   }
 
   if (file.size > MAX_UPLOAD_SIZE_BYTES) {
-    console.warn("Upload rejected: file size exceeds allowed limit", { size: file.size, limit: MAX_UPLOAD_SIZE_BYTES });
+    logWarning("Upload rejected: file size exceeds allowed limit", { size: file.size, limit: MAX_UPLOAD_SIZE_BYTES });
     return undefined;
   }
 
   if (!isAllowedUploadMimeType(file.type || "application/octet-stream")) {
-    console.warn("Upload rejected: unsupported MIME type", { mimeType: file.type });
+    logWarning("Upload rejected: unsupported MIME type", { mimeType: file.type });
     return undefined;
   }
 
@@ -145,7 +146,7 @@ export async function uploadFileToStorage(
   });
 
   if (error || !data?.path) {
-    console.warn("Supabase storage upload failed", { bucket, path: storagePath, error });
+    logWarning("Supabase storage upload failed", { bucket, path: storagePath, error });
     return undefined;
   }
 

@@ -210,7 +210,7 @@ export async function replaceDocumentVersion(
     mimeType: string;
     content: Buffer;
   },
-  userId?: string
+  _userId?: string
 ): Promise<DriveUploadResult> {
   if (!supabaseAdmin) {
     return {
@@ -290,7 +290,7 @@ export async function batchSyncDocumentsToDrive(
   }
 
   // Get documents to sync
-  let query = supabaseAdmin.from("documents").select("id, title, mime_type");
+  let query = supabaseAdmin.from("documents").select("id, title, mime_type, storage_path");
 
   if (onlyUnsynced) {
     query = query.is("google_drive_file_id", null);
@@ -315,31 +315,53 @@ export async function batchSyncDocumentsToDrive(
   };
 
   for (const doc of docs) {
-    // Try to fetch file content and sync
-    // Note: This assumes file content is stored somewhere accessible
-    // Implementation depends on your storage architecture
     try {
-      // Get file from storage
-      // const file = await getFileContent(doc.id);
-      // const result = await uploadToDriveAndLink({
-      //   fileName: doc.title,
-      //   mimeType: doc.mime_type,
-      //   fileContent: file,
-      //   documentId: doc.id,
-      // });
+      // Fetch raw file bytes from Supabase storage using the document's storage path.
+      const storagePath: string | null =
+        (doc as Record<string, unknown>).storage_path as string | null ?? null;
 
-      // if (result.success) {
-      //   results.successful++;
-      // } else {
-      //   results.failed++;
-      //   results.errors.push({
-      //     documentId: doc.id,
-      //     error: result.error || "Unknown error",
-      //   });
-      // }
+      if (!storagePath) {
+        results.failed++;
+        results.errors.push({
+          documentId: doc.id,
+          error: "No storage_path — document was never uploaded to Supabase storage.",
+        });
+        continue;
+      }
 
-      // Placeholder - implement based on your storage
-      results.successful++;
+      const { data: fileData, error: downloadError } = await supabaseAdmin
+        .storage
+        .from("documents")
+        .download(storagePath);
+
+      if (downloadError || !fileData) {
+        results.failed++;
+        results.errors.push({
+          documentId: doc.id,
+          error: downloadError?.message ?? "Failed to download file from storage.",
+        });
+        continue;
+      }
+
+      const arrayBuffer = await fileData.arrayBuffer();
+      const fileContent = Buffer.from(arrayBuffer);
+
+      const result = await uploadToDriveAndLink({
+        fileName: (doc as Record<string, unknown>).title as string ?? doc.id,
+        mimeType: (doc as Record<string, unknown>).mime_type as string ?? "application/octet-stream",
+        fileContent,
+        documentId: doc.id,
+      });
+
+      if (result.success) {
+        results.successful++;
+      } else {
+        results.failed++;
+        results.errors.push({
+          documentId: doc.id,
+          error: result.error ?? "Unknown sync error.",
+        });
+      }
     } catch (error) {
       results.failed++;
       results.errors.push({
