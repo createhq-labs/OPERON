@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
+import { motion } from "framer-motion";
 import type { Document } from "@/core/types";
 import { groupBlocksIntoSections } from "@/features/reader/groupSections";
 import { SectionRenderer } from "@/features/reader/sections/SectionRenderer";
@@ -10,6 +11,7 @@ import { ReadingProgressBar } from "@/features/reader/ReadingProgressBar";
 import { useDocumentReadPersistence } from "@/features/reader/useDocumentReadPersistence";
 import { useSectionProgress } from "@/features/reader/useSectionProgress";
 import { S } from "@/styles/sharedUi";
+import { motionPreset } from "@/styles/motionPresets";
 
 /**
  * The reader's own shell: hero, sticky progress bar, collapsible TOC,
@@ -36,13 +38,29 @@ export function DocumentReaderShell({ doc, onBack }: { doc: Document; onBack: ()
   const nextId = currentIndex >= 0 && currentIndex < sectionIds.length - 1 ? sectionIds[currentIndex + 1] : null;
 
   return (
-    <div>
+    <motion.div initial={motionPreset.page.initial} animate={motionPreset.page.animate} transition={motionPreset.page.transition}>
       <ReadingProgressBar percent={progress.percent} />
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 24px" }}>
-        <button type="button" onClick={onBack} style={S.btnGhost}>← Back to Library</button>
+        <motion.button
+          type="button"
+          onClick={onBack}
+          whileHover={{ x: -2 }}
+          whileTap={{ scale: 0.985 }}
+          style={S.btnGhost}
+        >
+          ← Back to Library
+        </motion.button>
         {doc.rawSourceUrl && (
-          <a href={doc.rawSourceUrl} download style={S.btnGhost}>Download original</a>
+          <motion.a
+            href={doc.rawSourceUrl}
+            download
+            whileHover={{ y: -1 }}
+            whileTap={{ scale: 0.985 }}
+            style={S.btnGhost}
+          >
+            Download original
+          </motion.a>
         )}
       </div>
 
@@ -67,12 +85,28 @@ export function DocumentReaderShell({ doc, onBack }: { doc: Document; onBack: ()
 
           <div style={{ display: "flex", justifyContent: "space-between", padding: "40px 0" }}>
             {prevId ? (
-              <button type="button" onClick={() => scrollToId(prevId)} style={S.btnGhost}>← Previous section</button>
+              <motion.button
+                type="button"
+                onClick={() => scrollToId(prevId)}
+                whileHover={{ x: -2 }}
+                whileTap={{ scale: 0.985 }}
+                style={S.btnGhost}
+              >
+                ← Previous section
+              </motion.button>
             ) : (
               <span />
             )}
             {nextId && (
-              <button type="button" onClick={() => scrollToId(nextId)} style={S.btnGhost}>Next section →</button>
+              <motion.button
+                type="button"
+                onClick={() => scrollToId(nextId)}
+                whileHover={{ x: 2 }}
+                whileTap={{ scale: 0.985 }}
+                style={S.btnGhost}
+              >
+                Next section →
+              </motion.button>
             )}
           </div>
         </div>
@@ -89,6 +123,6 @@ export function DocumentReaderShell({ doc, onBack }: { doc: Document; onBack: ()
       </div>
 
       <style>{`@media (max-width: 1023px) { .reader-shell-grid { grid-template-columns: 1fr !important; } }`}</style>
-    </div>
+    </motion.div>
   );
 }
