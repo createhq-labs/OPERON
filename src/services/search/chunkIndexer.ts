@@ -2,9 +2,11 @@ import type { Document, DriveDocumentReference, ResourceItem } from "@/core/oper
 import type { SemanticSearchChunk } from "./types";
 import { normalizeSearchText } from "./filters";
 
-function buildChunks(...segments: Array<string | undefined>) {
+type ChunkableItem = Document | DriveDocumentReference | ResourceItem;
+
+function buildChunks(...segments: Array<string | undefined>): string[] {
   return segments
-    .filter(Boolean)
+    .filter((v): v is string => Boolean(v))
     .map((value) => normalizeSearchText(value))
     .filter(Boolean)
     .reduce<string[]>((chunks, value) => {
@@ -16,34 +18,43 @@ function buildChunks(...segments: Array<string | undefined>) {
     }, []);
 }
 
-export function buildSemanticChunks(item: Document | DriveDocumentReference | ResourceItem): SemanticSearchChunk[] {
-  const dept = "dept" in item ? item.dept : undefined;
-  const tag = "tag" in item ? item.tag : undefined;
-  const storagePath = "storagePath" in item ? item.storagePath : undefined;
-  const storageBucket = "storageBucket" in item ? item.storageBucket : undefined;
+function resolveAuthorText(item: ChunkableItem): string | undefined {
+  if ("author" in item && typeof item.author === "string") return item.author;
+  if ("authorId" in item && typeof item.authorId === "string") return item.authorId;
+  if ("createdById" in item && typeof item.createdById === "string") return item.createdById;
+  return undefined;
+}
 
-  const baseText = [item.title, item.description, dept, tag, item.visibilityScope, storagePath, storageBucket]
-    .filter(Boolean)
-    .join(" ");
+export function buildSemanticChunks(item: ChunkableItem): SemanticSearchChunk[] {
+  const dept         = "dept" in item        ? item.dept        : undefined;
+  const tag          = "tag" in item         ? item.tag         : undefined;
+  const storagePath  = "storagePath" in item ? item.storagePath : undefined;
+  const storageBucket= "storageBucket" in item ? item.storageBucket : undefined;
+
+  const baseText = [
+    item.title, item.description, dept, tag,
+    item.visibilityScope, storagePath, storageBucket,
+  ].filter(Boolean).join(" ");
 
   const rawChunks = buildChunks(
     baseText,
-    "author" in item ? item.author : (item as any).authorId,
-    "rawSourceUrl" in item ? item.rawSourceUrl : undefined,
-    "driveUrl" in item ? item.driveUrl : undefined,
-    "folderName" in item ? item.folderName : undefined,
-    "href" in item ? item.href : undefined
+    resolveAuthorText(item),
+    "rawSourceUrl" in item  ? item.rawSourceUrl  : undefined,
+    "driveUrl" in item      ? item.driveUrl       : undefined,
+    "folderName" in item    ? item.folderName     : undefined,
+    "href" in item          ? item.href           : undefined,
   );
+
   const uniqueChunks = Array.from(new Set(rawChunks)).slice(0, 12);
 
   return uniqueChunks.map((text, index) => ({
-    id: `${item.id}-chunk-${index}`,
+    id:   `${item.id}-chunk-${index}`,
     text,
     metadata: {
-      source: "source" in item ? item.source : "uploaded",
-      departmentId: "departmentId" in item ? item.departmentId : undefined,
+      source:          "source" in item       ? item.source       : "uploaded",
+      departmentId:    "departmentId" in item ? item.departmentId : undefined,
       visibilityScope: item.visibilityScope,
-      entityType: "entityType" in item ? item.entityType : "document",
+      entityType:      "entityType" in item   ? item.entityType   : "document",
     },
   }));
 }

@@ -69,19 +69,6 @@ const nextConfig = {
     ],
   },
 
-  // ----------------------------------------------------------------
-  // Redirects
-  // ----------------------------------------------------------------
-  async redirects() {
-    return [
-      // Redirect bare /api/drive without an action to a 404-safe path
-      {
-        source: "/api/drive",
-        destination: "/404",
-        permanent: false,
-      },
-    ];
-  },
 };
 
 module.exports = nextConfig;

@@ -32,6 +32,7 @@ import {
   mapGooglePermissions,
   saveDriveAccount,
 } from "@/services/googleDriveClient";
+import { getCurrentDocumentVersionId } from "@/services/documentPlatform";
 import {
   enqueueIngestionJob,
   getIngestionJobs,
@@ -229,6 +230,7 @@ async function createDocumentPayloadFromMetadata(
     folderId: payload.folderId as string,
     folderName: payload.folderName as string,
     linkedDocumentId: payload.linkedDocumentId as string,
+    documentVersionId: payload.documentVersionId as string | undefined,
     uploadedBy: (payload.uploadedBy ?? payload.authorId) as string,
     driveUrl: payload.driveUrl as string,
     permissionSummary,
@@ -578,9 +580,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const permissions = mapGooglePermissions(
       (metadata.permissions as Array<{ role?: string; emailAddress?: string; domain?: string }>) ?? []
     );
+    const documentVersionId = body.linkedDocumentId
+      ? await getCurrentDocumentVersionId(body.linkedDocumentId as string)
+      : null;
+
     const document = await createDocumentPayloadFromMetadata(
       userId,
-      body,
+      { ...body, documentVersionId },
       metadata,
       permissions
     );
@@ -596,6 +602,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         for (const child of children) {
           if (!child.id || !child.mimeType) continue;
           const childPermissions = mapGooglePermissions(child.permissions ?? []);
+          const childDocumentVersionId = body.linkedDocumentId
+            ? await getCurrentDocumentVersionId(body.linkedDocumentId as string)
+            : null;
           const childDoc = await createDocumentPayloadFromMetadata(
             userId,
             {
@@ -617,6 +626,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
               folderId: fileId,
               folderName: body.folderName,
               linkedDocumentId: body.linkedDocumentId,
+              documentVersionId: childDocumentVersionId,
             },
             child as unknown as Record<string, unknown>,
             childPermissions

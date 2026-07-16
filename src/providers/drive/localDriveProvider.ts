@@ -58,6 +58,7 @@ function buildDocumentMetadata(payload: DriveAttachPayload, docId: string): Driv
     lastDriveModifiedAt: now,
     parserStatus: "pending",
     parserVersion: "1.0",
+    documentVersionId: payload.documentVersionId,
   };
 }
 

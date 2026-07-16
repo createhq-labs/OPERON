@@ -1,19 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { Menu } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import type { DriveDiagnostics } from "@/services/drive";
 import type {
-  DeptId, DocTag, Document, DriveParsedDocument, ResourceCategory,
-  Role, RoleId, User, UserType, VisibilityScope,
+  DeptId, DocTag, Document, DriveParsedDocument, QuickActionItem, ResourceCategory,
+  Role, RoleId, User, VisibilityScope,
 } from "@/core/operon";
 import {
-  canAddDocuments, isAdmin, saveRole, canDeleteRole, canEditRole,
+  isAdmin, saveRole, canDeleteRole, canEditRole,
   canManageResources, canManageRoles, canManageUsers, canPublishGlobally,
   canViewActivity, canViewResources, createDocumentUploadFromFile, createResource,
-  createUser, deleteRole, getAccessibleDocument, getAccessibleDocuments,
+  createUser, deleteRole, formatDocumentDate, getAccessibleDocument, getAccessibleDocuments,
   getActivityFeed, getAllUsers, getCreatableRoles, getDepartmentFilters,
   getPinnedDocuments, getQuickActions, getResourceById, getRoleLabel, getRoles,
   getSupervisors, getTeams, getUserById, getAssignableDepartments,
@@ -22,159 +23,20 @@ import {
 import {
   getProviderHealth, setDataProviderMode, subscribeToDataUpdates, onSupabaseHydrated,
 } from "@/services/api";
-import { renderBlock } from "@/renderers";
+import { DocumentReaderShell } from "@/features/reader/DocumentReaderShell";
 import { useSession } from "@/auth/useSession";
 import { MVPAccessMode } from "@/features/auth/MVPAccessMode";
 import { HomePanel } from "@/features/dashboard/HomePanel";
 import { Sidebar } from "@/components/Sidebar";
-
-// ─── Shared inline-style helpers (design system tokens) ──────────────────────
-
-const S = {
-  card: {
-    background:             "var(--op-surface)",
-    border:                 "1px solid var(--op-border)",
-    borderRadius:           "var(--r-lg)",
-    backdropFilter:         "var(--glass-blur)",
-    WebkitBackdropFilter:   "var(--glass-blur)",
-  },
-  cardInner: {
-    background:   "var(--op-surface-2)",
-    border:       "1px solid var(--op-border)",
-    borderRadius: "var(--r-md)",
-  },
-  input: {
-    background:   "var(--op-surface-2)",
-    border:       "1px solid var(--op-border)",
-    borderRadius: "var(--r-md)",
-    padding:      "10px 14px",
-    fontSize:     "var(--text-14)",
-    color:        "var(--op-text)",
-    width:        "100%",
-    outline:      "none",
-    fontFamily:   "var(--font-body)",
-  },
-  select: {
-    background:   "var(--op-surface-2)",
-    border:       "1px solid var(--op-border)",
-    borderRadius: "var(--r-md)",
-    padding:      "10px 14px",
-    fontSize:     "var(--text-14)",
-    color:        "var(--op-text)",
-    width:        "100%",
-    outline:      "none",
-    fontFamily:   "var(--font-body)",
-    cursor:       "pointer",
-  },
-  btnPrimary: {
-    background:   "var(--op-accent)",
-    color:        "#000",
-    border:       "none",
-    borderRadius: "var(--r-full)",
-    padding:      "0 20px",
-    height:       "38px",
-    fontFamily:   "var(--font-ui)",
-    fontSize:     "var(--text-13)",
-    fontWeight:   600,
-    cursor:       "pointer",
-    display:      "inline-flex" as const,
-    alignItems:   "center",
-    transition:   "opacity 120ms",
-  },
-  btnGhost: {
-    background:   "transparent",
-    color:        "var(--op-text-2)",
-    border:       "1px solid var(--op-border)",
-    borderRadius: "var(--r-full)",
-    padding:      "0 16px",
-    height:       "34px",
-    fontFamily:   "var(--font-ui)",
-    fontSize:     "var(--text-13)",
-    fontWeight:   500,
-    cursor:       "pointer",
-    display:      "inline-flex" as const,
-    alignItems:   "center",
-    transition:   "border-color 120ms, color 120ms",
-  },
-  label: {
-    fontFamily:    "var(--font-ui)",
-    fontSize:      "var(--text-12)",
-    fontWeight:    500,
-    color:         "var(--op-text-3)",
-    letterSpacing: "0.04em",
-    display:       "block" as const,
-    marginBottom:  "8px",
-  },
-  sectionTitle: {
-    fontFamily:    "var(--font-display)",
-    fontSize:      "var(--text-20)",
-    fontWeight:    400,
-    color:         "var(--op-text)",
-    letterSpacing: "-0.02em",
-    margin:        0,
-  },
-  sectionDesc: {
-    fontFamily:  "var(--font-body)",
-    fontSize:    "var(--text-14)",
-    color:       "var(--op-text-2)",
-    marginTop:   "6px",
-    lineHeight:  1.6,
-  },
-  pill: (active: boolean) => ({
-    display:       "inline-flex",
-    alignItems:    "center",
-    padding:       "5px 14px",
-    borderRadius:  "var(--r-full)",
-    border:        `1px solid ${active ? "var(--op-border-hover)" : "var(--op-border)"}`,
-    background:    active ? "rgba(255,255,255,0.08)" : "transparent",
-    color:         active ? "var(--op-text)" : "var(--op-text-2)",
-    fontFamily:    "var(--font-ui)",
-    fontSize:      "var(--text-12)",
-    fontWeight:    500,
-    cursor:        "pointer",
-    transition:    "all 150ms",
-    whiteSpace:    "nowrap" as const,
-  }),
-  toggleBtn: (active: boolean) => ({
-    display:      "flex",
-    alignItems:   "center",
-    justifyContent: "space-between",
-    padding:      "10px 14px",
-    borderRadius: "var(--r-md)",
-    border:       `1px solid ${active ? "var(--op-accent)" : "var(--op-border)"}`,
-    background:   active ? "rgba(245,166,35,0.08)" : "var(--op-surface-2)",
-    color:        active ? "var(--op-text)" : "var(--op-text-2)",
-    fontFamily:   "var(--font-ui)",
-    fontSize:     "var(--text-13)",
-    fontWeight:   500,
-    cursor:       "pointer",
-    transition:   "all 150ms",
-    width:        "100%",
-    textAlign:    "left" as const,
-  }),
-  badge: {
-    display:       "inline-flex",
-    alignItems:    "center",
-    padding:       "3px 10px",
-    borderRadius:  "var(--r-full)",
-    background:    "var(--op-surface-3)",
-    border:        "1px solid var(--op-border)",
-    fontFamily:    "var(--font-mono)",
-    fontSize:      "var(--text-11)",
-    color:         "var(--op-text-3)",
-    letterSpacing: "0.04em",
-    whiteSpace:    "nowrap" as const,
-  },
-  emptyState: {
-    border:          "1px dashed var(--op-border)",
-    borderRadius:    "var(--r-lg)",
-    padding:         "48px 24px",
-    textAlign:       "center" as const,
-    color:           "var(--op-text-3)",
-    fontFamily:      "var(--font-body)",
-    fontSize:        "var(--text-14)",
-  },
-} as const;
+import { NotificationBell } from "@/features/notifications/NotificationBell";
+import { PremiumSelect } from "@/components/PremiumSelect";
+import { ShellSkeleton } from "@/components/ShellSkeleton";
+import { openFloatingLayer, subscribeFloatingLayerClose } from "@/lib/floatingLayers";
+import { motionPreset } from "@/styles/motionPresets";
+import { S } from "@/styles/sharedUi";
+import { DEFAULT_ROLE_ID, ROLE_SELECTION_OPTIONS } from "@/core/roles";
+import { canAccessWorkforce } from "@/security/permissions";
+import { UPLOAD_ROLES } from "@/security/rolePolicies";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -187,6 +49,7 @@ const SECTION_NAMES = {
   finance:   "Finance",
   team:      "Team",
   roles:     "Roles",
+  workforce: "Workforce",
   docs:      "Document",
 } as const;
 
@@ -205,6 +68,9 @@ const LIBRARY_CATEGORIES: ReadonlyArray<{ id: string; label: string; tags: DocTa
   { id: "hr",         label: "HR",         tags: ["hr"] },
   { id: "finance",    label: "Finance",    tags: ["ops","creator"] },
   { id: "operations", label: "Operations", tags: ["ops","internal"] },
+  { id: "onboarding", label: "Onboarding", tags: ["onboarding"] },
+  { id: "creator",    label: "Creator",    tags: ["creator"] },
+  { id: "brand",      label: "Brand",      tags: ["brand"] },
   { id: "training",   label: "Training",   tags: ["onboarding"] },
   { id: "policies",   label: "Policies",   tags: ["sop","hr"] },
   { id: "sop",        label: "SOPs",       tags: ["sop"] },
@@ -234,7 +100,7 @@ export type LibraryCategoryId = (typeof LIBRARY_CATEGORIES)[number]["id"];
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function Page() {
-  const { user, loaded, signOut } = useSession();
+  const { user, loaded, signOut, selectRole } = useSession();
   const router = useRouter();
 
   // ── Navigation & search ──────────────────────────────────────────────────
@@ -258,7 +124,6 @@ export default function Page() {
   const [uploadVisibility,    setUploadVisibility]    = useState<VisibilityScope>("department");
   const [uploadDepartmentIds, setUploadDepartmentIds] = useState<DeptId[]>([]);
   const [uploadTeamIds,       setUploadTeamIds]       = useState<string[]>([]);
-  const [uploadUserTypes,     setUploadUserTypes]     = useState<UserType[]>(["employee"]);
   const [selectedRoleIds,     setSelectedRoleIds]     = useState<RoleId[]>([]);
   const [selectedUserIds,     setSelectedUserIds]     = useState<string[]>([]);
   const [uploadFile,          setUploadFile]          = useState<File | null>(null);
@@ -272,7 +137,6 @@ export default function Page() {
   const [resourceTitle,            setResourceTitle]            = useState("");
   const [resourceHref,             setResourceHref]             = useState("");
   const [resourceAllowedRoleIds,   setResourceAllowedRoleIds]   = useState<RoleId[]>(["role_cofounder","role_hr","role_finance","role_im_team_lead","role_tm_team_lead"]);
-  const [resourceAllowedUserTypes, _setResourceAllowedUserTypes] = useState<UserType[]>(["employee"]);
   const [resourceAllowedDepartments, setResourceAllowedDepartments] = useState<DeptId[]>([]);
   const [resourceAllowedTeamIds,   setResourceAllowedTeamIds]   = useState<string[]>([]);
   const [resourceVisibility,       setResourceVisibility]       = useState<VisibilityScope>("private");
@@ -292,7 +156,6 @@ export default function Page() {
   const [newRoleId,          setNewRoleId]          = useState<RoleId>("role_intern");
   const [newDepartmentId,    setNewDepartmentId]    = useState<DeptId>("im");
   const [newSupervisorId,    setNewSupervisorId]    = useState("");
-  const [newStatus,          setNewStatus]          = useState<User["status"]>("active");
   const [assignedDocumentIds,setAssignedDocumentIds]= useState<string[]>([]);
   const [teamStatus,         setTeamStatus]         = useState("");
   const [teamError,          setTeamError]          = useState("");
@@ -320,6 +183,7 @@ export default function Page() {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
+        openFloatingLayer("search");
         setIsSearchOpen(true);
         window.setTimeout(() => searchInputRef.current?.focus(), 0);
       }
@@ -328,6 +192,17 @@ export default function Page() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
+
+  useEffect(() => subscribeFloatingLayerClose("search", () => setIsSearchOpen(false)), []);
+  useEffect(() => subscribeFloatingLayerClose("mobile-nav", () => setIsMobileNavOpen(false)), []);
+
+  useEffect(() => {
+    if (loaded) return;
+    const timer = window.setTimeout(() => {
+      selectRole(DEFAULT_ROLE_ID);
+    }, 7500);
+    return () => window.clearTimeout(timer);
+  }, [loaded, selectRole]);
 
   // ─── Auth-driven section reset ────────────────────────────────────────────
   useEffect(() => {
@@ -370,7 +245,7 @@ export default function Page() {
     setRoles(getRoles());
   }, [user?.roleId]);
 
-  const quickActions = useMemo(() => (user ? getQuickActions(user) : []), [user]);
+  const quickActions = useMemo(() => (user ? getQuickActions(user) : []), [user, dataVersion]);
   const displayQuickActions = quickActions.length > 0 ? quickActions : cachedQuickActions;
 
   useEffect(() => {
@@ -380,15 +255,38 @@ export default function Page() {
   }, [providerLoading, quickActions]);
 
   // ─── Derived data ─────────────────────────────────────────────────────────
-  const pinnedDocs     = useMemo(() => (user ? getPinnedDocuments(user, 3) : []),               [user]);
-  const accessibleDocs = useMemo(() => (user ? getAccessibleDocuments(user) : []),              [user]);
-  const _availableUsers = useMemo(() => (user && isAdmin(user) ? getAllUsers() : []),            [user]);
-  const supervisors    = useMemo(() => (user ? getSupervisors(user) : []),                      [user]);
-  const _teams          = useMemo(() => (user ? getTeams() : []),                                [user]);
-  const creatableRoles = useMemo(() => (user ? getCreatableRoles(user) : []),                   [user]);
-  const uploadRoles    = creatableRoles;
-  const activityFeed   = useMemo(() => (user ? getActivityFeed(user) : []),                     [user]);
-  const assignableDepartments = useMemo(() => (user ? getAssignableDepartments(user, newRoleId) : []), [user, newRoleId]);
+  const pinnedDocs     = useMemo(() => (user ? getPinnedDocuments(user, 3) : []),               [user, dataVersion]);
+  const accessibleDocs = useMemo(() => (user ? getAccessibleDocuments(user) : []),              [user, dataVersion]);
+  const _availableUsers = useMemo(() => (user && isAdmin(user) ? getAllUsers() : []),            [user, dataVersion]);
+  const supervisors    = useMemo(() => (user ? getSupervisors(user) : []),                      [user, dataVersion]);
+  const _teams          = useMemo(() => (user ? getTeams() : []),                                [user, dataVersion]);
+  const creatableRoles = useMemo(() => (user ? getCreatableRoles(user) : []),                   [user, dataVersion]);
+  const activityFeed   = useMemo(() => (user ? getActivityFeed(user) : []),                     [user, dataVersion]);
+  const assignableDepartments = useMemo(() => (user ? getAssignableDepartments(user, newRoleId) : []), [user, newRoleId, dataVersion]);
+  const creatableRoleOptions = useMemo(
+    () => creatableRoles.map((role) => ({ value: role.id, label: role.name })),
+    [creatableRoles]
+  );
+  const assignableDepartmentOptions = useMemo(
+    () => getDepartmentFilters()
+      .filter((filter) => filter.id !== "all" && assignableDepartments.includes(filter.id as DeptId))
+      .map((filter) => ({ value: filter.id as DeptId, label: filter.label })),
+    [assignableDepartments]
+  );
+  const supervisorOptions = useMemo(
+    () => [
+      { value: "", label: "No supervisor", description: "Assign later from Lifecycle" },
+      ...supervisors.map((supervisor) => ({ value: supervisor.id, label: supervisor.name })),
+    ],
+    [supervisors]
+  );
+
+  useEffect(() => {
+    if (assignableDepartments.length === 0) return;
+    if (!assignableDepartments.includes(newDepartmentId)) {
+      setNewDepartmentId(assignableDepartments[0]);
+    }
+  }, [assignableDepartments, newDepartmentId]);
 
   const libraryDocs = useMemo(() => {
     if (!user) return [];
@@ -396,11 +294,11 @@ export default function Page() {
     if (libraryCategory === "all") return results;
     const cat = LIBRARY_CATEGORIES.find((c) => c.id === libraryCategory);
     return cat ? results.filter((doc) => cat.tags.includes(doc.tag)) : results;
-  }, [user, librarySearch, libraryDept, libraryCategory]);
+  }, [user, librarySearch, libraryDept, libraryCategory, dataVersion]);
 
   const resourceItems = useMemo(
     () => (user && canViewResources(user) ? searchResources(user, resourceQuery, resourceCategory === "all" ? undefined : resourceCategory) : []),
-    [user, resourceQuery, resourceCategory],
+    [user, resourceQuery, resourceCategory, dataVersion],
   );
 
   const globalSearchResults = useMemo(() => {
@@ -415,13 +313,16 @@ export default function Page() {
   const userCanManage     = user ? canManageUsers(user)     : false;
   const resourceCanView   = user ? canViewResources(user)   : false;
   const activityCanView   = user ? canViewActivity(user)    : false;
-  const userCanUpload     = user ? canAddDocuments(user)    : false;
+  // Gate upload panel against the policy set, not stored permissionIds, so existing
+  // Creator/Employee/Intern users in the DB are immediately blocked without a migration.
+  const userCanUpload = user ? UPLOAD_ROLES.has(user.roleId) : false;
   const financeAccess     = user ? canPublishGlobally(user) : false;
   const roleManagerAccess = user ? canManageRoles(user)     : false;
 
   const visibleSections = useMemo(() => {
     if (!user) return ["signin"] as Section[];
     const s: Section[] = ["home", "library"];
+    if (canAccessWorkforce(user)) s.push("workforce");
     if (resourceCanView)   s.push("resources");
     if (activityCanView)   s.push("activity");
     if (financeAccess)     s.push("finance");
@@ -429,6 +330,15 @@ export default function Page() {
     if (roleManagerAccess) s.push("roles");
     return s;
   }, [user, resourceCanView, activityCanView, userCanManage, roleManagerAccess, financeAccess]);
+
+  useEffect(() => {
+    const routeSection = new URLSearchParams(window.location.search).get("section") as Section | null;
+    if (!user || !routeSection || routeSection === "workforce") return;
+    if (visibleSections.includes(routeSection)) {
+      setSelectedSection(routeSection);
+      setSelectedDocId(null);
+    }
+  }, [user, visibleSections]);
 
   // ─── Role editor derived ──────────────────────────────────────────────────
   const selectedRole     = editingRoleId ? roles.find((r) => r.id === editingRoleId) ?? null : null;
@@ -454,6 +364,30 @@ export default function Page() {
   function showDoc(docId: string) {
     setSelectedDocId(docId);
     setSelectedSection("docs");
+  }
+
+  // Workforce lives in its own route tree (src/app/workforce/*), not as
+  // in-page state — this page is already a 1300+ line single-page component
+  // and Workforce has its own nested sub-navigation that doesn't fit the
+  // flat Section model.
+  function handleSectionSelect(s: string) {
+    if (s === "workforce") {
+      router.push("/workforce");
+      return;
+    }
+    setSelectedSection(s as Section);
+    if (s !== "docs") setSelectedDocId(null);
+  }
+
+  function handleQuickActionSelect(action: Pick<QuickActionItem, "id" | "category">) {
+    if (action.id === "library") {
+      setLibraryCategory(
+        LIBRARY_CATEGORIES.some((category) => category.id === action.category)
+          ? action.category as LibraryCategoryId
+          : "all",
+      );
+    }
+    handleSectionSelect(action.id);
   }
 
   async function handleLogout() {
@@ -545,7 +479,7 @@ export default function Page() {
         authorId:         user.id,
         tag:              uploadCategory,
         allowedRoleIds:   selectedRoleIds,
-        allowedUserTypes: uploadUserTypes,
+        allowedUserTypes: ["employee", "creator"],
         assignedUserIds:  user.roleId === "role_cofounder" ? selectedUserIds : undefined,
         visibilityScope:  uploadVisibility,
         allowedDepartments: uploadDepartmentIds.length > 0 ? uploadDepartmentIds : [departmentId],
@@ -558,10 +492,9 @@ export default function Page() {
       setSelectedUserIds([]);
       setUploadDepartmentIds([]);
       setUploadTeamIds([]);
-      setUploadUserTypes(["employee"]);
       setUploadVisibility("department");
-    } catch {
-      setUploadError("Upload failed. Please try again.");
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "Upload failed. Please try again.");
       setUploadStatus("");
     }
   }
@@ -577,7 +510,7 @@ export default function Page() {
       external:           true,
       icon:               "Link",
       allowedRoleIds:     resourceAllowedRoleIds,
-      allowedUserTypes:   resourceAllowedUserTypes,
+      allowedUserTypes:   ["employee", "creator"],
       allowedDepartments: resourceAllowedDepartments.length > 0 ? resourceAllowedDepartments : undefined,
       allowedTeamIds:     resourceAllowedTeamIds,
       visibilityScope:    resourceVisibility,
@@ -595,7 +528,7 @@ export default function Page() {
     if (!user) return;
     setTeamError(""); setTeamStatus("");
     try {
-      createUser({ creator: user, name: newName, email: newEmail, roleId: newRoleId, departmentId: newDepartmentId, supervisorId: newSupervisorId, assignedDocumentIds, status: newStatus });
+      createUser({ creator: user, name: newName, email: newEmail, roleId: newRoleId, departmentId: newDepartmentId, supervisorId: newSupervisorId || undefined, assignedDocumentIds, status: "active", dateJoined: formatDocumentDate() });
       setTeamStatus("User created.");
       setNewName(""); setNewEmail(""); setAssignedDocumentIds([]);
     } catch (err) {
@@ -605,15 +538,7 @@ export default function Page() {
 
   // ─── Loading screen ───────────────────────────────────────────────────────
 
-  if (!loaded) {
-    return (
-      <div style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ ...S.card, padding: "14px 24px", fontFamily: "var(--font-ui)", fontSize: "var(--text-14)", color: "var(--op-text-3)" }}>
-          Preparing workspace…
-        </div>
-      </div>
-    );
-  }
+  if (!loaded) return <ShellSkeleton />;
 
   if (!user) return <MVPAccessMode />;
 
@@ -635,14 +560,14 @@ export default function Page() {
               onClick={() => setIsMobileNavOpen(false)}
               style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.6)", border: "none", cursor: "pointer" }}
             />
-            <div style={{ position: "relative", left: "16px", top: "16px", height: "calc(100dvh - 32px)", width: "240px" }}>
+            <motion.div {...motionPreset.sheet} style={{ position: "relative", left: "16px", top: "16px", height: "calc(100dvh - 32px)", width: "240px" }}>
               <Sidebar
                 user={user} roleLabel={roleLabel}
                 sections={visibleSections} selectedSection={selectedSection}
                 onClose={() => setIsMobileNavOpen(false)}
-                onSelect={(s) => { setSelectedSection(s as Section); if (s !== "docs") setSelectedDocId(null); }}
+                onSelect={handleSectionSelect}
               />
-            </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -714,19 +639,19 @@ export default function Page() {
       </AnimatePresence>
 
       {/* Layout grid */}
-      <div style={{ maxWidth: "1400px", margin: "0 auto", display: "grid", gridTemplateColumns: "260px minmax(0,1fr)", gap: "24px", padding: "16px 32px" }} className="page-grid">
+      <div style={{ maxWidth: "1440px", margin: "0 auto", display: "grid", gridTemplateColumns: "260px minmax(0,1fr)", gap: "clamp(12px, 1.5vw, 24px)", padding: "clamp(16px, 2vw, 32px) clamp(16px, 3vw, 40px)" }} className="page-grid">
 
         {/* Sidebar — desktop only */}
         <div className="sidebar-col">
           <Sidebar
             user={user} roleLabel={roleLabel}
             sections={visibleSections} selectedSection={selectedSection}
-            onSelect={(s) => { setSelectedSection(s as Section); if (s !== "docs") setSelectedDocId(null); }}
+            onSelect={handleSectionSelect}
           />
         </div>
 
         {/* Main */}
-        <main style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "20px" }}>
+        <main style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "clamp(14px, 1.5vw, 24px)" }}>
 
           {/* Top bar */}
           <motion.header
@@ -736,11 +661,11 @@ export default function Page() {
             <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
               {/* Mobile menu — hidden on desktop */}
               <button
-                type="button" onClick={() => setIsMobileNavOpen(true)} className="mobile-only"
+                type="button" onClick={() => { openFloatingLayer("mobile-nav"); setIsMobileNavOpen(true); }} className="mobile-only"
                 style={{ display: "none", alignItems: "center", justifyContent: "center", height: "36px", width: "36px", borderRadius: "var(--r-md)", border: "1px solid var(--op-border)", background: "var(--op-surface-2)", cursor: "pointer", color: "var(--op-text-2)" }}
                 aria-label="Open navigation"
               >
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 4h10M2 7h10M2 10h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                <Menu size={16} strokeWidth={1.8} aria-hidden="true" />
               </button>
               <h1 style={{ fontFamily: "var(--font-display)", fontSize: "var(--text-16)", fontWeight: 600, color: "var(--op-text)", letterSpacing: "-0.01em", margin: 0 }}>
                 {SECTION_NAMES[selectedSection] ?? "Workspace"}
@@ -749,12 +674,13 @@ export default function Page() {
             <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
               {/* Search button — hidden on mobile */}
               <button
-                type="button" onClick={() => setIsSearchOpen(true)} className="search-btn"
+                type="button" onClick={() => { openFloatingLayer("search"); setIsSearchOpen(true); }} className="search-btn"
                 style={{ display: "none", alignItems: "center", gap: "8px", height: "36px", borderRadius: "var(--r-full)", border: "1px solid var(--op-border)", background: "var(--op-surface-2)", padding: "0 14px", cursor: "pointer", fontFamily: "var(--font-body)", fontSize: "var(--text-13)", color: "var(--op-text-3)" }}
               >
                 <span>Search…</span>
                 <span style={{ padding: "1px 5px", borderRadius: "var(--r-sm)", background: "var(--op-surface-3)", border: "1px solid var(--op-border)", fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--op-text-3)" }}>⌘K</span>
               </button>
+              <NotificationBell user={user} />
               <button type="button" onClick={handleLogout}
                 style={{ height: "34px", borderRadius: "var(--r-full)", background: "#fff", border: "none", padding: "0 16px", fontFamily: "var(--font-ui)", fontSize: "var(--text-13)", fontWeight: 600, color: "#0A0A0A", cursor: "pointer" }}
               >
@@ -766,7 +692,11 @@ export default function Page() {
           <style>{`
             @media (max-width: 1279px) { .sidebar-col { display: none; } .page-grid { grid-template-columns: minmax(0,1fr) !important; } }
             @media (max-width: 767px)  { .mobile-only { display: flex !important; } }
+            @media (max-width: 767px)  { .mobile-bottom-nav { display: flex !important; } main { padding-bottom: 62px; } }
             @media (min-width: 768px)  { .search-btn  { display: flex !important; } }
+            @media (max-width: 1023px) { .library-grid { grid-template-columns: minmax(0,1fr) !important; } }
+            @media (max-width: 1023px) { .pinned-grid { grid-template-columns: 1fr 1fr !important; } }
+            @media (max-width: 599px)  { .pinned-grid { grid-template-columns: 1fr !important; } }
           `}</style>
 
           {/* ── Sections ──────────────────────────────────────────────────────── */}
@@ -778,7 +708,7 @@ export default function Page() {
               <HomePanel
                 user={user} providerLoading={providerLoading} driveDiagnostics={driveDiagnostics}
                 displayQuickActions={displayQuickActions} accessibleDocs={accessibleDocs} pinnedDocs={pinnedDocs}
-                onActionSelect={(s) => { setSelectedSection(s as Section); if (s !== "docs") setSelectedDocId(null); }}
+                onActionSelect={handleQuickActionSelect}
                 onShowDoc={showDoc}
               />
             )}
@@ -786,11 +716,11 @@ export default function Page() {
             {/* Library */}
             {selectedSection === "library" && (
               <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}
-                style={{ display: "grid", gridTemplateColumns: userCanUpload ? "minmax(0,1fr) 320px" : "minmax(0,1fr)", gap: "20px", alignItems: "start" }}
+                style={{ display: "grid", gridTemplateColumns: userCanUpload ? "minmax(0,1fr) 320px" : "minmax(0,1fr)", gap: "clamp(12px, 1.5vw, 20px)", alignItems: "start" }}
                 className="library-grid"
               >
                 {/* Doc list */}
-                <div style={{ ...S.card, padding: "24px" }}>
+                <div style={{ ...S.card, padding: "clamp(16px, 2.5vw, 32px)" }}>
                   {/* Header */}
                   <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: "16px", marginBottom: "20px", flexWrap: "wrap" }}>
                     <div>
@@ -894,32 +824,17 @@ export default function Page() {
 
                     {/* Allowed roles */}
                     <div>
-                      <div style={S.label}>Allowed roles</div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                        {uploadRoles.map((role) => (
-                          <button key={role.id} type="button"
-                            onClick={() => setSelectedRoleIds((c) => c.includes(role.id) ? c.filter((id) => id !== role.id) : [...c, role.id])}
-                            style={S.toggleBtn(selectedRoleIds.includes(role.id))}
+                      <div style={S.label}>Visible to</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+                        {ROLE_SELECTION_OPTIONS.map((opt) => (
+                          <button key={opt.id} type="button"
+                            onClick={() => setSelectedRoleIds((c) => c.includes(opt.id) ? c.filter((id) => id !== opt.id) : [...c, opt.id])}
+                            style={S.toggleBtn(selectedRoleIds.includes(opt.id))}
                           >
-                            <span>{role.name}</span>
-                            <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-11)", color: selectedRoleIds.includes(role.id) ? "var(--op-accent)" : "var(--op-text-3)" }}>
-                              {selectedRoleIds.includes(role.id) ? "✓" : ""}
+                            <span>{opt.title}</span>
+                            <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-11)", color: selectedRoleIds.includes(opt.id) ? "var(--op-accent)" : "var(--op-text-3)" }}>
+                              {selectedRoleIds.includes(opt.id) ? "✓" : ""}
                             </span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* User types */}
-                    <div>
-                      <div style={S.label}>User types</div>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" }}>
-                        {(["employee", "creator"] as UserType[]).map((type) => (
-                          <button key={type} type="button"
-                            onClick={() => setUploadUserTypes((c) => c.includes(type) ? c.filter((t) => t !== type) : [...c, type])}
-                            style={{ ...S.toggleBtn(uploadUserTypes.includes(type)), justifyContent: "center" }}
-                          >
-                            {type === "employee" ? "Employees" : "Creators"}
                           </button>
                         ))}
                       </div>
@@ -1034,11 +949,11 @@ export default function Page() {
                     <input value={resourceTitle} onChange={(e) => setResourceTitle(e.target.value)} placeholder="Title" style={S.input} />
                     <input value={resourceHref} onChange={(e) => setResourceHref(e.target.value)} placeholder="URL" style={S.input} />
                     <div>
-                      <div style={S.label}>Allowed roles</div>
+                      <div style={S.label}>Visible to</div>
                       <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
-                        {getRoles().map((role) => (
-                          <button key={role.id} type="button" onClick={() => setResourceAllowedRoleIds((c) => c.includes(role.id) ? c.filter((id) => id !== role.id) : [...c, role.id])} style={S.toggleBtn(resourceAllowedRoleIds.includes(role.id))}>
-                            <span>{role.name}</span>
+                        {ROLE_SELECTION_OPTIONS.map((opt) => (
+                          <button key={opt.id} type="button" onClick={() => setResourceAllowedRoleIds((c) => c.includes(opt.id) ? c.filter((id) => id !== opt.id) : [...c, opt.id])} style={S.toggleBtn(resourceAllowedRoleIds.includes(opt.id))}>
+                            <span>{opt.title}</span>
                           </button>
                         ))}
                       </div>
@@ -1276,23 +1191,36 @@ export default function Page() {
                     <input value={newName}  onChange={(e) => setNewName(e.target.value)}  placeholder="Full name" style={S.input} />
                     <input value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="Email"     style={S.input} />
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-                      <select value={newRoleId}       onChange={(e) => setNewRoleId(e.target.value as RoleId)}       style={S.select}>{creatableRoles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select>
-                      <select value={newDepartmentId} onChange={(e) => setNewDepartmentId(e.target.value as DeptId)} style={S.select}>
-                        {getDepartmentFilters().filter((f) => f.id !== "all" && assignableDepartments.includes(f.id as DeptId)).map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
-                      </select>
+                      <PremiumSelect<RoleId>
+                        label="Role"
+                        value={newRoleId}
+                        options={creatableRoleOptions}
+                        disabled={creatableRoleOptions.length === 0}
+                        onChange={setNewRoleId}
+                      />
+                      <PremiumSelect<DeptId>
+                        label="Department"
+                        value={newDepartmentId}
+                        options={assignableDepartmentOptions}
+                        disabled={assignableDepartmentOptions.length === 0}
+                        onChange={setNewDepartmentId}
+                      />
                     </div>
-                    <select value={newSupervisorId} onChange={(e) => setNewSupervisorId(e.target.value)} style={S.select}>
-                      <option value="">No supervisor</option>
-                      {supervisors.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
-                    <select value={newStatus} onChange={(e) => setNewStatus(e.target.value as User["status"])} style={S.select}>
-                      <option value="active">Active</option>
-                      <option value="invited">Invited</option>
-                      <option value="disabled">Disabled</option>
-                    </select>
+                    {supervisors.length > 0 ? (
+                      <PremiumSelect<string>
+                        label="Supervisor (optional)"
+                        value={newSupervisorId}
+                        options={supervisorOptions}
+                        onChange={setNewSupervisorId}
+                      />
+                    ) : (
+                      <div style={{ fontFamily: "var(--font-body)", fontSize: "var(--text-12)", color: "var(--op-text-3)", lineHeight: 1.5 }}>
+                        Supervisor can be assigned later from Lifecycle.
+                      </div>
+                    )}
                     <button type="button" onClick={handleCreateUser}
-                      disabled={!newName.trim() || !newEmail.trim()}
-                      style={{ ...S.btnPrimary, width: "100%", height: "38px", justifyContent: "center", opacity: (!newName.trim() || !newEmail.trim()) ? 0.4 : 1, cursor: (!newName.trim() || !newEmail.trim()) ? "not-allowed" : "pointer" }}
+                      disabled={!newName.trim() || !newEmail.trim() || assignableDepartments.length === 0 || creatableRoles.length === 0}
+                      style={{ ...S.btnPrimary, width: "100%", height: "38px", justifyContent: "center", opacity: (!newName.trim() || !newEmail.trim() || assignableDepartments.length === 0 || creatableRoles.length === 0) ? 0.4 : 1, cursor: (!newName.trim() || !newEmail.trim() || assignableDepartments.length === 0 || creatableRoles.length === 0) ? "not-allowed" : "pointer" }}
                     >Create user</button>
                     {teamStatus && <p style={{ fontFamily: "var(--font-body)", fontSize: "var(--text-12)", color: "var(--op-text-3)", margin: 0 }}>{teamStatus}</p>}
                     {teamError  && <p style={{ fontFamily: "var(--font-body)", fontSize: "var(--text-12)", color: "var(--color-error)", margin: 0 }}>{teamError}</p>}
@@ -1302,64 +1230,63 @@ export default function Page() {
               </motion.div>
             )}
 
-            {/* Document detail */}
+            {/* Document detail — Interactive Document Reader */}
             {selectedSection === "docs" && selectedDoc && (
               <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "16px", marginBottom: "24px", flexWrap: "wrap" }}>
-                  <div>
-                    <div style={{ fontFamily: "var(--font-ui)", fontSize: "var(--text-11)", fontWeight: 600, color: "var(--op-text-3)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "8px" }}>Document</div>
-                    <h2 style={{ ...S.sectionTitle, fontSize: "var(--text-30)" }}>{selectedDoc.title}</h2>
-                    <p style={S.sectionDesc}>{selectedDoc.description}</p>
-                  </div>
-                  <button type="button" onClick={() => setSelectedSection("library")} style={S.btnGhost}>← Library</button>
-                </div>
-
-                <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.2fr) 280px", gap: "20px", alignItems: "start" }} className="doc-detail-grid">
-                  <div style={{ ...S.card, padding: "24px" }}>
-                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "20px" }}>
-                      {selectedDoc.source === "google_drive" && <span style={{ ...S.badge, color: "#60a5fa", borderColor: "rgba(96,165,250,0.3)" }}>Google Drive</span>}
-                      <span style={S.badge}>{TAG_LABELS[selectedDoc.tag]}</span>
-                      <span style={S.badge}>{selectedDoc.dept}</span>
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                      {selectedDoc.blocks.map((block, i) => renderBlock(block as Parameters<typeof renderBlock>[0], i))}
-                    </div>
-                  </div>
-                  <aside style={{ ...S.card, padding: "20px", display: "flex", flexDirection: "column", gap: "16px" }}>
-                    <div>
-                      <div style={{ fontFamily: "var(--font-ui)", fontSize: "var(--text-11)", fontWeight: 600, color: "var(--op-text-3)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "10px" }}>Details</div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                        {[["Author", selectedDoc.author], ["Updated", selectedDoc.updatedAt], ["Version", selectedDoc.version]].map(([k, v]) => (
-                          <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: "8px" }}>
-                            <span style={{ fontFamily: "var(--font-ui)", fontSize: "var(--text-12)", color: "var(--op-text-3)" }}>{k}</span>
-                            <span style={{ fontFamily: "var(--font-body)", fontSize: "var(--text-12)", color: "var(--op-text-2)" }}>{v}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    {pinnedDocs.length > 0 && (
-                      <div>
-                        <div style={{ fontFamily: "var(--font-ui)", fontSize: "var(--text-11)", fontWeight: 600, color: "var(--op-text-3)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "10px" }}>Pinned</div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                          {pinnedDocs.map((doc) => (
-                            <button key={doc.id} type="button" onClick={() => showDoc(doc.id)}
-                              style={{ ...S.cardInner, padding: "10px 12px", textAlign: "left", cursor: "pointer", fontFamily: "var(--font-ui)", fontSize: "var(--text-13)", color: "var(--op-text-2)", border: "1px solid var(--op-border)", transition: "border-color 150ms" }}
-                              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--op-border-hover)"; }}
-                              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--op-border)"; }}
-                            >{doc.title}</button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </aside>
-                </div>
-                <style>{`@media (max-width: 1023px) { .doc-detail-grid { grid-template-columns: minmax(0,1fr) !important; } }`}</style>
+                <DocumentReaderShell doc={selectedDoc} onBack={() => setSelectedSection("library")} />
               </motion.div>
             )}
 
           </div>
         </main>
       </div>
+      <motion.nav
+        initial={{ opacity: 0, y: 18 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.25 }}
+        className="mobile-bottom-nav"
+        aria-label="Mobile section navigation"
+        style={{
+          position: "fixed",
+          left: "12px",
+          right: "12px",
+          bottom: "12px",
+          zIndex: 35,
+          display: "none",
+          gap: "4px",
+          padding: "5px",
+          overflowX: "auto",
+          ...S.floatingPanel,
+          borderRadius: "var(--r-full)",
+        }}
+      >
+        {visibleSections.map((section) => {
+          const active = selectedSection === section;
+          return (
+            <button
+              key={section}
+              type="button"
+              onClick={() => handleSectionSelect(section)}
+              aria-current={active ? "page" : undefined}
+              style={{
+                flex: "1 0 auto",
+                minWidth: "66px",
+                height: "34px",
+                padding: "0 10px",
+                borderRadius: "var(--r-full)",
+                background: active ? "rgba(255,255,255,0.11)" : "transparent",
+                color: active ? "var(--op-text)" : "var(--op-text-3)",
+                fontFamily: "var(--font-ui)",
+                fontSize: "var(--text-11)",
+                fontWeight: active ? 700 : 500,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {SECTION_NAMES[section] ?? section}
+            </button>
+          );
+        })}
+      </motion.nav>
     </div>
   );
 }

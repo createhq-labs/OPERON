@@ -1287,3 +1287,133 @@
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+/* ===========================================
+   OPERON INTERACTION UTILITIES
+   Apply alongside inline S.card etc. to get
+   hover/focus states that inline styles can't express.
+   =========================================== */
+
+/* Card that lifts on hover — add className="op-lift" */
+.op-lift {
+  transition: border-color var(--dur-normal) var(--ease),
+              transform    var(--dur-normal) var(--ease),
+              box-shadow   var(--dur-normal) var(--ease);
+}
+.op-lift:hover {
+  border-color: var(--op-border-hover) !important;
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+}
+
+/* Clickable row — subtle background sweep */
+.op-row-interactive {
+  transition: background var(--dur-fast) var(--ease);
+  cursor: pointer;
+}
+.op-row-interactive:hover {
+  background: rgba(255, 255, 255, 0.03) !important;
+}
+
+/* Focus ring for custom elements */
+.op-focus-ring:focus-visible {
+  outline: 1.5px solid var(--color-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+/* Button hover states for S.btnPrimary / S.btnGhost inline-style buttons */
+.op-btn-primary:hover:not(:disabled) { opacity: 0.88; }
+.op-btn-primary:active:not(:disabled) { transform: scale(0.98); }
+.op-btn-ghost:hover:not(:disabled) {
+  border-color: var(--op-border-hover) !important;
+  color: var(--op-text) !important;
+}
+.op-btn-danger:hover:not(:disabled) {
+  background: rgba(255, 90, 70, 0.08) !important;
+}
+
+/* ===========================================
+   EMPTY STATE  (improved — replaces .op-empty in globals.css)
+   =========================================== */
+
+.op-empty-v2 {
+  border:          1px dashed var(--op-border);
+  border-radius:   var(--r-lg);
+  background:      rgba(255, 255, 255, 0.015);
+  display:         flex;
+  flex-direction:  column;
+  align-items:     center;
+  justify-content: center;
+  padding:         64px 32px;
+  text-align:      center;
+  gap:             10px;
+}
+
+.op-empty-v2 .op-empty-icon {
+  width:           40px;
+  height:          40px;
+  border-radius:   var(--r-md);
+  background:      rgba(255, 255, 255, 0.04);
+  border:          1px solid var(--op-border);
+  display:         flex;
+  align-items:     center;
+  justify-content: center;
+  color:           var(--op-text-3);
+  margin-bottom:   4px;
+  flex-shrink:     0;
+}
+
+.op-empty-v2 .op-empty-title {
+  font-family: var(--font-ui);
+  font-size:   var(--text-14);
+  font-weight: 600;
+  color:       var(--op-text-2);
+  margin:      0;
+}
+
+.op-empty-v2 .op-empty-desc {
+  font-family: var(--font-body);
+  font-size:   var(--text-13);
+  color:       var(--op-text-3);
+  line-height: 1.55;
+  max-width:   280px;
+  margin:      0;
+}
+
+.op-empty-v2 .op-empty-action {
+  margin-top: 4px;
+}
+
+/* ===========================================
+   SECTION WRAPPER
+   =========================================== */
+
+.op-section {
+  display:        flex;
+  flex-direction: column;
+  gap:            16px;
+}
+
+.op-section + .op-section {
+  margin-top: 8px;
+}
+
+/* ===========================================
+   POPOVER / FLOATING PANEL
+   =========================================== */
+
+.op-popover {
+  background:           var(--op-surface-3);
+  border:               1px solid var(--op-border);
+  border-radius:        var(--r-lg);
+  backdrop-filter:      var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow:           var(--shadow-lg);
+  animation:            fadeInScale var(--dur-normal) var(--ease-out) both;
+}
+
+@keyframes fadeInScale {
+  from { opacity: 0; transform: translateY(-4px) scale(0.97); }
+  to   { opacity: 1; transform: none; }
+}

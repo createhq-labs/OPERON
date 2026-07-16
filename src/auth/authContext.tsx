@@ -9,7 +9,7 @@ import {
   type PropsWithChildren,
 } from "react";
 import type { User } from "@/core/operon";
-import { getRoleById } from "@/core/operon";
+import { getRoleById, getRolePermissionIds, registerLocalUser } from "@/core/operon";
 import { resolveSessionUser } from "@/auth/sessionResolver";
 import { authAdapter } from "@/auth/authAdapter";
 import { getSupabaseDiagnostics, resolveSupabaseAvailability } from "@/lib/supabase";
@@ -39,6 +39,7 @@ export interface AuthState {
 
 const ROLE_KEY = "operon-selected-role";
 const ROLE_LABEL_KEY = "operon-selected-role-label";
+const AUTH_BOOTSTRAP_FALLBACK_MS = 6500;
 
 function readStorage(key: string): string | null {
   if (typeof window === "undefined") return null;
@@ -78,7 +79,7 @@ function createLocalUser(roleId: string, displayRoleName?: string): User {
   const resolvedRoleId = role?.id ?? DEFAULT_ROLE_ID;
   const displayName = displayRoleName ?? role?.name ?? "Employee";
 
-  return {
+  const user: User = {
     id: `local-${resolvedRoleId}`,
     name: `Local ${displayName}`,
     email: "",
@@ -88,10 +89,16 @@ function createLocalUser(roleId: string, displayRoleName?: string): User {
     departmentId: undefined,
     teamId: undefined,
     supervisorId: undefined,
-    permissionIds: [],
+    permissionIds: role ? getRolePermissionIds(role) : [],
     createdById: "local",
     status: "active",
   };
+
+  // Write paths across the app re-resolve the actor via getUserById before
+  // allowing a create/update — register this synthetic identity in the
+  // in-memory store (never synced to Supabase) so those lookups succeed.
+  registerLocalUser(user);
+  return user;
 }
 
 // ─── Context ──────────────────────────────────────────────────────────────────
@@ -120,6 +127,16 @@ export function AuthProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     mountedRef.current = true;
     const startTime = performance.now();
+    const fallbackTimer = window.setTimeout(() => {
+      if (!mountedRef.current) return;
+      setUser(createLocalUser(DEFAULT_ROLE_ID));
+      setStatus("authenticated");
+      setError(undefined);
+      setLoaded(true);
+      logRuntimeWarning("Auth bootstrap fallback activated", {
+        timeoutMs: AUTH_BOOTSTRAP_FALLBACK_MS,
+      });
+    }, AUTH_BOOTSTRAP_FALLBACK_MS);
 
     async function hydrate() {
       const diagnostics = getSupabaseDiagnostics();
@@ -133,6 +150,20 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
       const currentUser =
         sessionResult.status === "fulfilled" ? sessionResult.value : null;
+
+      // A deboarded account is disabled, not deleted — its Supabase session
+      // may still be technically valid. Block it here, before the MVP local
+      // role fallback below, so a disabled real account can never resolve
+      // to a local demo role instead.
+      if (currentUser?.status === "disabled") {
+        if (!mountedRef.current) return;
+        window.clearTimeout(fallbackTimer);
+        setUser(null);
+        setStatus("unauthenticated");
+        setError("This account has been deactivated.");
+        setLoaded(true);
+        return;
+      }
 
       const availability =
         availabilityResult.status === "fulfilled"
@@ -161,6 +192,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
         : "failed";
 
       if (!mountedRef.current) return;
+      window.clearTimeout(fallbackTimer);
 
       setUser(activeUser);
       setStatus(resolvedStatus);
@@ -186,6 +218,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
     hydrate().catch((err) => {
       if (!mountedRef.current) return;
+      window.clearTimeout(fallbackTimer);
       const message = err instanceof Error ? err.message : String(err);
       setStatus("failed");
       setError(message);
@@ -204,9 +237,15 @@ export function AuthProvider({ children }: PropsWithChildren) {
         ) {
           const currentUser = await resolveSessionUser();
           if (!mountedRef.current) return;
-          setUser(currentUser);
-          setStatus(currentUser ? "authenticated" : "unauthenticated");
-          setError(undefined);
+          if (currentUser?.status === "disabled") {
+            setUser(null);
+            setStatus("unauthenticated");
+            setError("This account has been deactivated.");
+          } else {
+            setUser(currentUser);
+            setStatus(currentUser ? "authenticated" : "unauthenticated");
+            setError(undefined);
+          }
         }
 
         if (event === "SIGNED_OUT") {
@@ -224,6 +263,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
     return () => {
       mountedRef.current = false;
+      window.clearTimeout(fallbackTimer);
       subscriptionRef.current?.unsubscribe();
     };
   }, []);
@@ -266,6 +306,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     setUser(createLocalUser(resolvedRoleId, resolvedDisplayName));
     setStatus("authenticated");
     setError(undefined);
+    setLoaded(true);
   }
 
   return (

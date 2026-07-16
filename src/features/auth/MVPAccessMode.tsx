@@ -8,14 +8,29 @@ import { ROLE_SELECTION_OPTIONS } from "@/core/roles";
 // ─── Role descriptions ────────────────────────────────────────────────────────
 
 const ROLE_DESCRIPTIONS: Record<string, string> = {
-  role_cofounder:    "Full platform owner",
-  role_hr:           "Onboarding and policies",
-  role_finance:      "SOPs and reporting",
-  role_im_team_lead: "IM Team & SOPs",
-  role_tm_team_lead: "TM Team & SOPs",
-  role_creator:      "Marketing and brand",
-  role_employee:     "Team member (IM/TM)",
-  role_intern:       "Restricted training",
+  // Leadership
+  role_cofounder:           "Full platform access",
+  // HR
+  role_hr:                  "People ops and onboarding",
+  role_hr_executive:        "HR support and records",
+  // Finance
+  role_finance:             "SOPs, reporting and approvals",
+  role_finance_associate:   "Finance knowledge base",
+  // Talent Management
+  role_senior_tm:           "TM leadership and oversight",
+  role_tm_team_lead:        "Team and leave management",
+  role_category_lead:       "Category management",
+  role_creator_acquisition: "TM team member",
+  role_tm_associate:        "TM team member",
+  // Influencer Marketing
+  role_im_team_lead:        "Team and leave management",
+  role_im_executive:        "IM team member",
+  role_im_associate:        "IM team member",
+  // Sales
+  role_sales_executive:     "Sales knowledge base",
+  // Creators & Interns
+  role_creator:             "Assigned brand resources",
+  role_intern:              "Approved training content",
 };
 
 // ─── SVG paths — Create icon mark only (C symbol + || bars) ──────────────────

@@ -23,33 +23,37 @@ export type ParserCapability =
   | "ocrReady";
 
 export interface ParserMetadata {
-  parserType: ParserType;
-  parserId: string;
-  title: string;
-  description?: string;
-  extensions: string[];
-  mimeTypes: string[];
-  capabilities: ParserCapability[];
+  parserType:          ParserType;
+  parserId:            string;
+  title:               string;
+  description?:        string;
+  extensions:          string[];
+  mimeTypes:           string[];
+  capabilities:        ParserCapability[];
   confidenceBaseline?: number;
 }
 
 export type ParserHandler = ParserMetadata & {
-  parseUploadedFile?: (file: File) => Promise<ParserResult>;
+  parseUploadedFile?:  (file: File) => Promise<ParserResult>;
   parseDriveDocument?: (document: DriveDocumentPayload) => ParserResult;
 };
 
 const parserRegistry = new Map<ParserType, ParserHandler>();
 
-export function registerParser(handler: ParserHandler) {
+export function registerParser(handler: ParserHandler): void {
   parserRegistry.set(handler.parserType, handler);
 }
 
-export function resolveParser(parserType: string | undefined): ParserHandler | undefined {
+export function resolveParser(
+  parserType: string | undefined
+): ParserHandler | undefined {
   if (!parserType) return undefined;
   return parserRegistry.get(parserType as ParserType);
 }
 
-export function getParserByMimeType(mimeType: string | undefined): ParserHandler | undefined {
+export function getParserByMimeType(
+  mimeType: string | undefined
+): ParserHandler | undefined {
   if (!mimeType) return undefined;
   const normalized = mimeType.toLowerCase();
   return Array.from(parserRegistry.values()).find((handler) =>
@@ -57,17 +61,24 @@ export function getParserByMimeType(mimeType: string | undefined): ParserHandler
   );
 }
 
-export function getParserByExtension(extension: string | undefined): ParserHandler | undefined {
+export function getParserByExtension(
+  extension: string | undefined
+): ParserHandler | undefined {
   if (!extension) return undefined;
   const normalized = extension.toLowerCase();
-  return Array.from(parserRegistry.values()).find((handler) => handler.extensions.includes(normalized));
+  return Array.from(parserRegistry.values()).find((handler) =>
+    handler.extensions.includes(normalized)
+  );
 }
 
-export function getParserTypeForFile(fileName: string, mimeType?: string) {
+export function getParserTypeForFile(
+  fileName: string,
+  mimeType?: string
+): ParserHandler | undefined {
   const extension = fileName.split(".").pop()?.toLowerCase();
   return getParserByMimeType(mimeType) ?? getParserByExtension(extension);
 }
 
-export function listRegisteredParsers() {
+export function listRegisteredParsers(): ParserHandler[] {
   return Array.from(parserRegistry.values());
 }

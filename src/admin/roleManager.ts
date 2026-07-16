@@ -5,7 +5,7 @@ export function canAssignRole(actor: User, targetRoleId: RoleId): boolean {
   if (isAdmin(actor)) {
     return true;
   }
-  if (targetRoleId === "role_admin" || targetRoleId === "role_cofounder") {
+  if (targetRoleId === "role_cofounder") {
     return false;
   }
   return actor.roleId !== "role_intern";

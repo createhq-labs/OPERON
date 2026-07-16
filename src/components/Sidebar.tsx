@@ -3,54 +3,31 @@
 import Image from "next/image";
 import { useMemo } from "react";
 import { motion } from "framer-motion";
+import {
+  Activity,
+  BookOpen,
+  BriefcaseBusiness,
+  CircleDollarSign,
+  Home,
+  Settings2,
+  Users,
+  type LucideIcon,
+} from "lucide-react";
 import type { User } from "@/core/types";
 import { Logo } from "@/components/Logo";
+import { spring } from "@/styles/motionPresets";
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
-const SECTION_ICONS: Record<string, React.ReactNode> = {
-  home: (
-    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <path d="M2 6.5L8 2l6 4.5V14a.5.5 0 01-.5.5h-4V10h-3v4.5h-4A.5.5 0 012 14V6.5z" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round"/>
-    </svg>
-  ),
-  library: (
-    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <rect x="2" y="2" width="5" height="12" rx="1" stroke="currentColor" strokeWidth="1.25"/>
-      <rect x="9" y="2" width="5" height="7" rx="1" stroke="currentColor" strokeWidth="1.25"/>
-      <rect x="9" y="11" width="5" height="3" rx="1" stroke="currentColor" strokeWidth="1.25"/>
-    </svg>
-  ),
-  resources: (
-    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.25"/>
-      <path d="M8 2.5c-2 2-2 7 0 11M8 2.5c2 2 2 7 0 11M2.5 8h11" stroke="currentColor" strokeWidth="1.25"/>
-    </svg>
-  ),
-  activity: (
-    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <path d="M1.5 8h2.5l2-5 3 9 2-6 1.5 2H14.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round"/>
-    </svg>
-  ),
-  finance: (
-    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <path d="M8 1.5v13M5 4.5h4.5a2 2 0 010 4H6.5a2 2 0 000 4H11" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round"/>
-    </svg>
-  ),
-  team: (
-    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <circle cx="6" cy="5.5" r="2.5" stroke="currentColor" strokeWidth="1.25"/>
-      <path d="M1 13.5c0-2.5 2.5-4 5-4s5 1.5 5 4" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round"/>
-      <circle cx="12" cy="5.5" r="2" stroke="currentColor" strokeWidth="1.25"/>
-      <path d="M14.5 13c0-1.8-1.2-3-3-3.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round"/>
-    </svg>
-  ),
-  roles: (
-    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <circle cx="8" cy="8" r="2.5" stroke="currentColor" strokeWidth="1.25"/>
-      <path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round"/>
-    </svg>
-  ),
+const SECTION_ICONS: Record<string, LucideIcon> = {
+  home:      Home,
+  library:   BookOpen,
+  resources: BriefcaseBusiness,
+  activity:  Activity,
+  finance:   CircleDollarSign,
+  team:      Users,
+  roles:     Settings2,
+  workforce: Users,
 };
 
 const SECTION_LABELS: Record<string, string> = {
@@ -61,6 +38,7 @@ const SECTION_LABELS: Record<string, string> = {
   finance:   "Finance",
   team:      "Team",
   roles:     "Roles",
+  workforce: "Workforce",
 };
 
 // ─── Drive Status ─────────────────────────────────────────────────────────────
@@ -149,18 +127,21 @@ export function Sidebar({
     <motion.aside
       initial={{ opacity: 0, x: -12 }}
       animate={{ opacity: 1, x: 0 }}
-      transition={{ duration: 0.3, ease: [0.44, 0, 0.56, 1] }}
+      exit={{ opacity: 0, x: -12 }}
+      transition={spring.soft}
       aria-label="Main navigation"
       style={{
         position:        "fixed",
-        left:            0,
-        top:             0,
-        width:           "var(--sidebar-width)",
-        height:          "100dvh",
+        left:            "16px",
+        top:             "16px",
+        width:           "228px",
+        height:          "calc(100dvh - 32px)",
         background:      "var(--op-sidebar-bg)",
         backdropFilter:  "var(--glass-blur-lg)",
         WebkitBackdropFilter: "var(--glass-blur-lg)",
-        borderRight:     "1px solid var(--op-border)",
+        border:          "1px solid var(--op-border)",
+        borderRadius:    "var(--r-xl)",
+        boxShadow:       "var(--shadow-lg)",
         padding:         "20px 12px",
         display:         "flex",
         flexDirection:   "column",
@@ -169,7 +150,6 @@ export function Sidebar({
         zIndex:          10,
         overflowY:       "auto",
       }}
-      className="hidden xl:flex"
     >
       {/* Logo — only branding placement in the app */}
       <motion.div
@@ -193,6 +173,7 @@ export function Sidebar({
         {sections.map((section, index) => {
           const active = selectedSection === section;
           const label = SECTION_LABELS[section] ?? section;
+          const Icon = SECTION_ICONS[section] ?? Settings2;
           return (
             <motion.button
               key={section}
@@ -207,8 +188,8 @@ export function Sidebar({
                 delay:    index * 0.04,
                 ease:     [0.44, 0, 0.56, 1],
               }}
-              whileHover={!active ? { x: 2 } : {}}
-              whileTap={{ scale: 0.98 }}
+              whileHover={{ x: active ? 0 : 2, backgroundColor: active ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.045)" }}
+              whileTap={{ scale: 0.985 }}
               style={{
                 display:      "flex",
                 alignItems:   "center",
@@ -219,7 +200,7 @@ export function Sidebar({
                 fontSize:     "var(--text-14)",
                 fontWeight:   active ? 600 : 500,
                 color:        active ? "var(--op-text)" : "var(--op-text-2)",
-                background:   active ? "rgba(255,255,255,0.06)" : "transparent",
+                background:   active ? "rgba(255,255,255,0.08)" : "transparent",
                 border:       "none",
                 cursor:       "pointer",
                 transition:   "background 140ms, color 140ms",
@@ -234,14 +215,13 @@ export function Sidebar({
                   layoutId="sidebar-active-indicator"
                   style={{
                     position:     "absolute",
-                    left:         0,
-                    top:          "22%",
-                    bottom:       "22%",
-                    width:        "2px",
-                    borderRadius: "1px",
+                    inset:        0,
+                    borderRadius: "var(--r-md)",
+                    border:       "1px solid rgba(255,255,255,0.05)",
                     background:   "var(--op-accent)",
+                    opacity:      0.1,
                   }}
-                  transition={{ duration: 0.2, ease: [0.44, 0, 0.56, 1] }}
+                  transition={spring.snappy}
                 />
               )}
               <span
@@ -252,7 +232,7 @@ export function Sidebar({
                   flexShrink: 0,
                 }}
               >
-                {SECTION_ICONS[section]}
+                <Icon size={15} strokeWidth={1.8} aria-hidden="true" />
               </span>
               <span>{label}</span>
             </motion.button>

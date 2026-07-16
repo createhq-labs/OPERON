@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { DEFAULT_ROLE_ID } from "@/core/roles";
 import type { DriveDocumentReference } from "@/core/operon";
 import type { DriveAttachPayload, DriveConnectResult } from "@/providers/drive/driveProvider";
 
@@ -50,7 +51,14 @@ async function fetchDriveApi(action: string, body?: Record<string, unknown>) {
       return { error: true, message: "Drive service unavailable." };
     }
 
-    return await response.json();
+    const json = await response.json();
+    if (json?.success === false) {
+      return { error: true, message: json.message || json.error || "Drive service unavailable." };
+    }
+    // The API wraps successful payloads as { success, data }; some actions
+    // (e.g. the OAuth "auth" redirect) respond with a flat shape instead.
+    // Unwrap when present so callers always see the payload directly.
+    return json?.data !== undefined ? json.data : json;
   } catch {
     return { error: true, message: "Drive service unavailable." };
   }
@@ -201,7 +209,7 @@ export async function uploadToProvider(
   formData.append("userId", userId);
   // Use a sensible default for required fields; callers can extend this
   // by calling the API directly with full metadata.
-  formData.append("roleId", "role_employee");
+  formData.append("roleId", DEFAULT_ROLE_ID);
   formData.append("title", file.name);
 
   const headers: Record<string, string> = {};

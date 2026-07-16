@@ -27,6 +27,7 @@ export interface DriveAttachPayload {
   folderId?: string;
   folderName?: string;
   linkedDocumentId?: string;
+  documentVersionId?: string;
 }
 
 export interface DriveConnectResult {

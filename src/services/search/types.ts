@@ -1,4 +1,4 @@
-import type { DeptId, Document, DriveDocumentReference, ResourceItem, User } from "@/core/operon";
+import type { DeptId } from "@/core/operon";
 
 export type SearchSort = "relevance" | "updatedAt" | "pinned";
 

@@ -7,18 +7,28 @@ import type {
   DriveDocumentReference,
   DriveDocumentPermission,
   GoogleDocsApiDocument,
-  PermissionId,
   QuickActionItem,
-  ResourceCategory,
   ResourceItem,
   Role,
   RoleId,
   Team,
   User,
   UserType,
+  UserStatus,
   VideoItem,
+  OnboardingRecord,
+  LeaveRequest,
+  LeaveBalance,
+  AttendanceRecord,
+  AttendanceAuditEntry,
+  Holiday,
+  ProbationRecord,
+  ProbationNote,
+  DeboardingRecord,
+  ManagerHistoryEntry,
+  Notification,
 } from "@/core/operon";
-import { ROLE_IDS } from "@/core/roles";
+import { DEFAULT_ROLE_ID } from "@/core/roles";
 import { getSupabaseDiagnostics, supabase, isSupabaseConfigured as isSupabaseConfiguredLib } from "@/lib/supabase";
 import { withTimeout } from "@/lib/async";
 import { uploadFileToStorage } from "@/services/storage";
@@ -44,6 +54,20 @@ export interface ProviderHealth {
   diagnostics?: ReturnType<typeof getSupabaseDiagnostics>;
 }
 
+/**
+ * This file manages the HR/roster domain (users, hr_*, hr_notifications,
+ * hr_activity_log) plus a separate, unrelated set of entities that have no
+ * live backing at all (documents, resources, drive_*, roles/departments/teams
+ * catalogs, ingestion_*, videos, quick_actions) and stay on local mock data
+ * permanently — there is no live schema for those and none is planned; see
+ * the per-store comments near reconcileSupabaseData()/hydrateSupabaseCache().
+ *
+ * Identity lives directly on the Finance Dashboard's real public.users table
+ * (not a parallel one) — see supabase-migrations/010_hr_domain_on_public_users.sql.
+ * This is the SAME table src/services/documentPlatform.ts's `workforce` schema
+ * already resolves identity against, just a different set of columns/tables
+ * layered on top of it.
+ */
 const configuredForSupabase = isSupabaseConfiguredLib();
 const productionEnforceSupabase = process.env.NODE_ENV === "production";
 const DATA_HYDRATION_TIMEOUT_MS = 4000;
@@ -139,7 +163,13 @@ function handleSupabaseError(error: unknown) {
     metadata: { error: String(error) },
   });
   console.warn("Supabase request failed", error);
-  supabaseAvailable = false;
+  // Deliberately does NOT flip supabaseAvailable — several entity types in
+  // this file (roles/departments/teams/documents/drive_*/resources/
+  // ingestion_*/videos/quick_actions/uploads) have no live table at all and
+  // never will (out of scope of the HR/users live-data work); one of their
+  // writes failing must not cascade into disabling sync for the tables that
+  // DO exist (users, hr_*). checkSupabaseConnectivity()/hydration already
+  // independently gate supabaseAvailable at startup.
 }
 
 function safeSupabaseWrite(operation: () => unknown) {
@@ -180,6 +210,184 @@ function createUpsertPayload<T extends { id: string }>(payload: T) {
   return { ...payload, legacy_id: payload.id };
 }
 
+/**
+ * public.users is a real, pre-existing Finance Dashboard table — its column
+ * names (full_name, role, business_line, team_lead_id, team_name) don't match
+ * the generic camelCase mapper, and its `id` is a real uuid primary key, not
+ * a legacy_id. This is a dedicated mapper for that shape, separate from
+ * src/auth/authAdapter.ts's own mapSupabaseUser (that one resolves "who's
+ * logged in"; this one lists/writes the roster).
+ */
+function mapUserRow(row: Record<string, unknown>): User {
+  return {
+    id:            row.id as string,
+    name:          (row.full_name as string | null) || (row.email as string) || "",
+    email:         row.email as string,
+    avatar:        "",
+    userType:      ((row.user_type as UserType | null) ?? "employee"),
+    roleId:        (row.role as string | null) ?? DEFAULT_ROLE_ID,
+    departmentId:  (row.business_line as string | null) ?? undefined,
+    teamId:        (row.team_name as string | null) ?? undefined,
+    supervisorId:  (row.team_lead_id as string | null) ?? undefined,
+    permissionIds: [],
+    createdById:   (row.created_by as string | null) ?? "",
+    status:        (row.status as UserStatus | null) ?? "active",
+    dateJoined:    (row.date_joined as string | null) ?? undefined,
+  };
+}
+
+function toUserRow(user: User) {
+  return {
+    full_name:     user.name,
+    email:         user.email,
+    role:          user.roleId,
+    team_name:     user.teamId ?? null,
+    status:        user.status,
+    team_lead_id:  user.supervisorId ?? null,
+    business_line: user.departmentId ?? null,
+    user_type:     user.userType,
+    date_joined:   user.dateJoined ?? null,
+  };
+}
+
+// HR tables use `user_id`/`*_by_id` style columns that don't match the
+// generic camelCase spread createUpsertPayload relies on for other tables —
+// these map explicitly so HR writes actually land on the right columns.
+// IDs are real uuids now (public.hr_* tables), not legacy_id text.
+
+function toHrOnboardingRow(record: OnboardingRecord) {
+  return {
+    id:                 record.id,
+    user_id:            record.userId,
+    status:             record.status,
+    onboarding_data:    record.onboardingData,
+    compliance_data:    record.complianceData,
+    form11_sent_at:     record.form11SentAt ?? null,
+    submitted_at:       record.submittedAt ?? null,
+    acknowledged_by_id: record.acknowledgedById ?? null,
+    acknowledged_at:    record.acknowledgedAt ?? null,
+    completed_by_id:    record.completedById ?? null,
+    completed_at:       record.completedAt ?? null,
+    rejected_by_id:     record.rejectedById ?? null,
+    rejected_at:        record.rejectedAt ?? null,
+    rejection_reason:   record.rejectionReason ?? null,
+    created_at:         record.createdAt,
+  };
+}
+
+function toLeaveRequestRow(record: LeaveRequest) {
+  return {
+    id:                record.id,
+    user_id:           record.userId,
+    request_type:      record.requestType,
+    date_from:         record.dateFrom,
+    date_to:           record.dateTo,
+    reason:            record.reason,
+    additional_info:   record.additionalInfo ?? null,
+    status:            record.status,
+    rejection_reason:  record.rejectionReason ?? null,
+    tl_approved_by_id: record.tlApprovedById ?? null,
+    tl_approved_at:    record.tlApprovedAt ?? null,
+    hr_approved_by_id: record.hrApprovedById ?? null,
+    hr_approved_at:    record.hrApprovedAt ?? null,
+    founder_notified:  record.founderNotified,
+    created_at:        record.createdAt,
+    updated_at:        record.updatedAt,
+  };
+}
+
+function toAttendanceRow(record: AttendanceRecord) {
+  return {
+    id:         record.id,
+    user_id:    record.userId,
+    month:      record.month,
+    days:       record.days,
+    created_at: record.createdAt,
+    updated_at: record.updatedAt,
+  };
+}
+
+function toHolidayRow(record: Holiday) {
+  return {
+    id:            record.id,
+    date:          record.date,
+    name:          record.name,
+    type:          record.type,
+    created_by_id: record.createdById,
+    created_at:    record.createdAt,
+    updated_at:    record.updatedAt,
+  };
+}
+
+function toProbationRow(record: ProbationRecord) {
+  return {
+    id:                        record.id,
+    user_id:                   record.userId,
+    date_joined:               record.dateJoined,
+    probation_duration_days:   record.probationDurationDays,
+    probation_duration_unit:   record.probationDurationUnit,
+    expected_review_date:      record.expectedReviewDate,
+    status:                    record.status,
+    reviewed_by_id:            record.reviewedById ?? null,
+    reviewed_at:               record.reviewedAt ?? null,
+    parent_record_id:          record.parentRecordId ?? null,
+    notes:                     null,
+    submitted_by_id:           record.submittedById,
+    created_at:                record.createdAt,
+  };
+}
+
+function toManagerHistoryRow(record: ManagerHistoryEntry) {
+  return {
+    id:             record.id,
+    user_id:        record.userId,
+    supervisor_id:  record.supervisorId ?? null,
+    changed_by_id:  record.changedById,
+    effective_from: record.effectiveFrom,
+    created_at:     record.createdAt,
+  };
+}
+
+function toDeboardingRow(record: DeboardingRecord) {
+  return {
+    id:                     record.id,
+    user_id:                record.userId,
+    initiated_by_id:        record.initiatedById,
+    track:                  record.track,
+    status:                 record.status,
+    reason:                 record.reason ?? null,
+    initiated_at:           record.initiatedAt,
+    approved_by_id:         record.approvedById ?? null,
+    approved_at:            record.approvedAt ?? null,
+    founder_approved_by_id: record.founderApprovedById ?? null,
+    founder_approved_at:    record.founderApprovedAt ?? null,
+    checklist:              record.checklist,
+    completed_by_id:        record.completedById ?? null,
+    completed_at:           record.completedAt ?? null,
+    created_at:             record.createdAt,
+  };
+}
+
+function toNotificationRow(notification: Notification) {
+  return {
+    id:                notification.id,
+    title:             notification.title,
+    body:              notification.body,
+    notification_type: notification.notificationType,
+    audience:          notification.audience,
+    department_ids:    notification.departmentIds ?? null,
+    role_ids:          notification.roleIds ?? null,
+    user_ids:          notification.userIds ?? null,
+    actor_id:          notification.actorId    ?? null,
+    entity_type:       notification.entityType ?? null,
+    entity_id:         notification.entityId   ?? null,
+    metadata:          notification.metadata   ?? {},
+    created_at:        notification.createdAt,
+    expires_at:        notification.expiresAt  ?? null,
+    unread_by:         notification.unreadBy   ?? [],
+  };
+}
+
 async function checkSupabaseConnectivity() {
   if (!isSupabaseConfigured()) {
     return false;
@@ -189,7 +397,7 @@ async function checkSupabaseConnectivity() {
     type ConnResult = { data: { id: string }[] | null; error: { message: string } | null };
     const connFallback: ConnResult = { data: [], error: { message: "Supabase connectivity check timed out." } };
     const result = await withTimeout(
-      supabase.from("roles").select("id").limit(1) as unknown as Promise<ConnResult>,
+      supabase.from("users").select("id").limit(1) as unknown as Promise<ConnResult>,
       DATA_HYDRATION_TIMEOUT_MS,
       connFallback
     );
@@ -207,26 +415,25 @@ async function reconcileSupabaseData() {
 
   try {
     await Promise.all([
-      supabase.from("roles").upsert(roleStore.map(createUpsertPayload), { onConflict: "legacy_id" }),
-      supabase.from("users").upsert(userStore.map(createUpsertPayload), { onConflict: "legacy_id" }),
-      supabase.from("departments").upsert(departmentStore.map(createUpsertPayload), { onConflict: "legacy_id" }),
-      supabase.from("teams").upsert(teamStore.map(createUpsertPayload), { onConflict: "legacy_id" }),
-      supabase.from("documents").upsert(documentStore.map(createUpsertPayload), { onConflict: "legacy_id" }),
-      supabase.from("drive_documents").upsert(driveDocumentStore.map(createUpsertPayload), { onConflict: "legacy_id" }),
-      supabase.from("resources").upsert(resourceStore.map(createUpsertPayload), { onConflict: "legacy_id" }),
-      supabase.from("activity_logs").upsert(activityStore.map(createUpsertPayload), { onConflict: "legacy_id" }),
-      supabase.from("ingestion_jobs").upsert(ingestionJobStore.map(createUpsertPayload), { onConflict: "legacy_id" }),
-      supabase.from("ingestion_results").upsert(ingestionResultStore.map(createUpsertPayload), { onConflict: "legacy_id" }),
-      supabase.from("ingestion_failures").upsert(ingestionFailureStore.map(createUpsertPayload), { onConflict: "legacy_id" }),
+      supabase.from("users").upsert(userStore.map(toUserRow), { onConflict: "id" }),
     ]);
   } catch (error) {
     console.warn("Supabase reconciliation failed", error);
   }
 
+  // roles/departments/teams/documents/drive_documents/resources/videos/
+  // quick_actions/ingestion_* have no live table at all (out of scope —
+  // stay on local mock permanently) and are deliberately NOT synced here.
   try {
     await Promise.allSettled([
-      supabase.from("videos").upsert(videoStore.map(createUpsertPayload), { onConflict: "legacy_id" }),
-      supabase.from("quick_actions").upsert(quickActionStore.map(createUpsertPayload), { onConflict: "legacy_id" }),
+      supabase.from("hr_onboarding").upsert(hrOnboardingStore.map(toHrOnboardingRow), { onConflict: "id" }),
+      supabase.from("hr_leave_requests").upsert(hrLeaveRequestStore.map(toLeaveRequestRow), { onConflict: "id" }),
+      supabase.from("hr_attendance").upsert(hrAttendanceStore.map(toAttendanceRow), { onConflict: "id" }),
+      supabase.from("hr_holidays").upsert(hrHolidayStore.map(toHolidayRow), { onConflict: "id" }),
+      supabase.from("hr_probation").upsert(hrProbationStore.map(toProbationRow), { onConflict: "id" }),
+      supabase.from("hr_manager_history").upsert(hrManagerHistoryStore.map(toManagerHistoryRow), { onConflict: "id" }),
+      supabase.from("hr_deboarding").upsert(hrDeboardingStore.map(toDeboardingRow), { onConflict: "id" }),
+      supabase.from("hr_notifications").upsert(notificationStore.map(toNotificationRow), { onConflict: "id" }),
     ]);
   } catch (error) {
     console.warn("Optional Supabase reconciliation failed", error);
@@ -320,12 +527,19 @@ export function isSyncAvailable() {
   return supabaseAvailable;
 }
 
+// Mirrors the live 5-value public.user_role enum. The former 16-role catalog
+// collapsed into these — see supabase-migrations/010_hr_domain_on_public_users.sql
+// for the full mapping and what separation-of-duties/granularity was lost.
+// Each role's permissions are the union of every legacy role that merged
+// into it (a merge never removes a capability a constituent role had).
+// `userType` here is vestigial (creator-vs-employee is now User.userType,
+// not a role property) — kept "employee" on every entry for shape compatibility.
 const ROLES: Role[] = [
   {
-    id: "role_cofounder",
-    name: "Co-Founder / Admin",
-    description: "Full platform owner with unrestricted access.",
-    group: "co_founders",
+    id: "admin",
+    name: "Admin",
+    description: "Full platform owner with unrestricted access (formerly Cofounder, HR, HR Executive).",
+    group: "leadership",
     userType: "employee",
     createdById: "system",
     permissions: {
@@ -342,35 +556,25 @@ const ROLES: Role[] = [
         viewCreatorOps: true,
         viewBrand: true,
         viewOperations: true,
+        approveLeaveTl: true,
+        approveLeaveHr: true,
+        manageHrCalendar: true,
+        viewHrRecordsAll: true,
+        submitProbationReview: true,
+        decideProbationReview: true,
+        acknowledgeDeboarding: true,
+        approveDeboardingEmployeeTrack: true,
+        flagDeboardingAny: true,
+        viewTeamLeaveHistory: true,
+        managePeople: true,
+        manageOnboarding: true,
       },
     },
   },
   {
-    id: "role_im_team_lead",
-    name: "IM Team Lead",
-    description: "Manages IM team, SOPs, and documentation. No access to TM content.",
-    group: "team_lead",
-    userType: "employee",
-    createdById: "system",
-    permissions: {
-      documents: { create: true, view: true, edit: true, delete: true, upload: true },
-      users: { create: false, edit: false, delete: false, assignRole: false },
-      system: { adminPanelAccess: false, roleManagement: false },
-      features: {
-        viewActivity: true,
-        viewResources: true,
-        manageResources: true,
-        viewCreatorOps: true,
-        viewOperations: true,
-        viewBrand: false,
-        sendToAll: true,
-      },
-    },
-  },
-  {
-    id: "role_tm_team_lead",
-    name: "TM Team Lead",
-    description: "Manages TM team, SOPs, and documentation. No access to IM content.",
+    id: "team_lead",
+    name: "Team Lead",
+    description: "Team and leave management (formerly Senior TM, Category Lead, IM/TM Team Lead).",
     group: "team_lead",
     userType: "employee",
     createdById: "system",
@@ -384,67 +588,42 @@ const ROLES: Role[] = [
         manageResources: true,
         viewBrand: true,
         viewOperations: true,
-        viewCreatorOps: false,
+        viewCreatorOps: true,
         sendToAll: true,
+        approveLeaveTl: true,
+        viewTeamLeaveHistory: true,
+        managePeople: true,
       },
     },
   },
   {
-    id: "role_hr",
-    name: "HR Manager",
-    description: "Independent management of onboarding, policies, and compliance.",
+    id: "finance",
+    name: "Finance",
+    description: "SOPs, reporting and approvals (formerly Finance Manager, Finance Associate).",
     group: "team_member",
     userType: "employee",
     createdById: "system",
     permissions: {
-      documents: { 
-        create: true, 
-        view: true, 
-        edit: true, 
-        delete: false, 
-        upload: true 
-      },
+      documents: { create: true, view: true, edit: true, delete: false, upload: true },
       users: { create: false, edit: false, delete: false, assignRole: false },
       system: { adminPanelAccess: false, roleManagement: false },
       features: {
-        viewHr: true,
-        viewOnboarding: true,
-        viewResources: true,
-        manageResources: true,
-        sendToAll: true,
-      },
-    },
-  },
-  {
-    id: "role_finance",
-    name: "Finance Manager",
-    description: "Independent management of finance SOPs and reporting workflows.",
-    group: "team_member",
-    userType: "employee",
-    createdById: "system",
-    permissions: {
-      documents: { 
-        create: true, 
-        view: true, 
-        edit: true, 
-        delete: false, 
-        upload: true 
-      },
-      users: { create: false, edit: false, delete: false, assignRole: false },
-      system: { adminPanelAccess: false, roleManagement: false },
-      features: {
+        viewActivity: true,
         viewOperations: true,
         viewResources: true,
         manageResources: true,
         sendToAll: true,
+        approveLeaveTl: true,
+        viewTeamLeaveHistory: true,
+        managePeople: true,
       },
     },
   },
   {
-    id: "role_intern",
-    name: "Intern",
-    description: "Restricted access to onboarding and training materials.",
-    group: "intern",
+    id: "employee",
+    name: "Employee",
+    description: "Standard team member access (formerly Creator Acquisition, TM/IM Associate, IM Executive, Sales Executive, Intern, Content Creator).",
+    group: "team_member",
     userType: "employee",
     createdById: "system",
     permissions: {
@@ -452,49 +631,27 @@ const ROLES: Role[] = [
       users: { create: false, edit: false, delete: false, assignRole: false },
       system: { adminPanelAccess: false, roleManagement: false },
       features: {
-        viewOnboarding: true,
         viewResources: true,
-      },
-    },
-  },
-  {
-    id: "role_creator",
-    name: "Creator",
-    description: "Independent role managing marketing assets and brand resources.",
-    group: "creator",
-    userType: "creator",
-    createdById: "system",
-    permissions: {
-      documents: { 
-        create: true, 
-        view: true, 
-        edit: true, 
-        delete: false, 
-        upload: true 
-      },
-      users: { create: false, edit: false, delete: false, assignRole: false },
-      system: { adminPanelAccess: false, roleManagement: false },
-      features: {
+        viewBrand: true,
         viewCreatorOps: true,
-        viewResources: true,
+        viewOperations: true,
+        viewOnboarding: true,
       },
     },
   },
   {
-    id: "role_employee",
-    name: "Employee",
-    description: "Team-based member (IM/TM). Read-only access to team content.",
+    id: "developer",
+    name: "Developer",
+    description: "Engineering tooling access. No legacy-role equivalent — new to the live 5-role enum.",
     group: "team_member",
     userType: "employee",
     createdById: "system",
     permissions: {
-      documents: { create: false, view: true, edit: false, delete: false, upload: true },
+      documents: { create: false, view: true, edit: false, delete: false, upload: false },
       users: { create: false, edit: false, delete: false, assignRole: false },
       system: { adminPanelAccess: false, roleManagement: false },
       features: {
         viewResources: true,
-        viewOnboarding: true,
-        viewOperations: true,
       },
     },
   },
@@ -505,6 +662,7 @@ const DEPARTMENTS: Department[] = [
   { id: "tm", name: "Talent Management" },
   { id: "hr", name: "HR" },
   { id: "finance", name: "Finance" },
+  { id: "sales", name: "Sales" },
   { id: "onboarding", name: "Onboarding" },
   { id: "creator", name: "Creator Ops" },
   { id: "brand", name: "Brand Management" },
@@ -514,6 +672,7 @@ const DEPARTMENTS: Department[] = [
 const TEAMS: Team[] = [
   { id: "team_im", name: "Influencer Marketing", departmentId: "im" },
   { id: "team_tm", name: "Talent Management", departmentId: "tm" },
+  { id: "team_sales", name: "Sales", departmentId: "sales" },
   { id: "team_hr", name: "HR Operations", departmentId: "hr" },
   { id: "team_finance", name: "Finance Operations", departmentId: "finance" },
 ];
@@ -525,7 +684,7 @@ const USERS: User[] = [
     email: "sarah@example.com",
     avatar: "SA",
     userType: "employee",
-    roleId: "role_cofounder",
+    roleId: "admin",
     departmentId: "operations",
     permissionIds: [
       "view_library",
@@ -548,6 +707,7 @@ const USERS: User[] = [
     ],
     createdById: "u1",
     status: "active",
+    dateJoined: "2021-01-04",
   },
   {
     id: "u2",
@@ -555,7 +715,7 @@ const USERS: User[] = [
     email: "maya@example.com",
     avatar: "MP",
     userType: "employee",
-    roleId: "role_im_team_lead",
+    roleId: "team_lead",
     departmentId: "im",
     teamId: "team_im",
     permissionIds: [
@@ -572,6 +732,7 @@ const USERS: User[] = [
     ],
     createdById: "u1",
     status: "active",
+    dateJoined: "2021-06-14",
   },
   {
     id: "u3",
@@ -579,7 +740,7 @@ const USERS: User[] = [
     email: "lucas@example.com",
     avatar: "LK",
     userType: "employee",
-    roleId: "role_tm_team_lead",
+    roleId: "team_lead",
     departmentId: "tm",
     teamId: "team_tm",
     permissionIds: [
@@ -596,6 +757,7 @@ const USERS: User[] = [
     ],
     createdById: "u1",
     status: "active",
+    dateJoined: "2021-09-01",
   },
   {
     id: "u4",
@@ -603,12 +765,13 @@ const USERS: User[] = [
     email: "james@example.com",
     avatar: "JC",
     userType: "employee",
-    roleId: "role_employee",
+    roleId: "employee",
     departmentId: "im",
     teamId: "team_im",
     permissionIds: ["view_library", "view_documents", "view_creator_ops", "view_resources"],
     createdById: "u2",
     status: "active",
+    dateJoined: "2022-02-21",
   },
   {
     id: "u5",
@@ -616,12 +779,13 @@ const USERS: User[] = [
     email: "ava@example.com",
     avatar: "AL",
     userType: "employee",
-    roleId: "role_employee",
+    roleId: "employee",
     departmentId: "tm",
     teamId: "team_tm",
     permissionIds: ["view_library", "view_documents", "view_brand", "view_resources"],
     createdById: "u3",
     status: "active",
+    dateJoined: "2022-05-09",
   },
   {
     id: "u6",
@@ -629,7 +793,7 @@ const USERS: User[] = [
     email: "noah@example.com",
     avatar: "NR",
     userType: "employee",
-    roleId: "role_hr",
+    roleId: "admin",
     departmentId: "hr",
     teamId: "team_hr",
     permissionIds: [
@@ -643,6 +807,7 @@ const USERS: User[] = [
     ],
     createdById: "u1",
     status: "active",
+    dateJoined: "2021-11-15",
   },
   {
     id: "u8",
@@ -650,7 +815,7 @@ const USERS: User[] = [
     email: "evelyn@example.com",
     avatar: "EB",
     userType: "employee",
-    roleId: "role_finance",
+    roleId: "finance",
     departmentId: "finance",
     teamId: "team_finance",
     permissionIds: [
@@ -662,6 +827,7 @@ const USERS: User[] = [
     ],
     createdById: "u1",
     status: "active",
+    dateJoined: "2022-08-03",
   },
   {
     id: "u7",
@@ -669,7 +835,7 @@ const USERS: User[] = [
     email: "jade@example.com",
     avatar: "JR",
     userType: "creator",
-    roleId: "role_creator",
+    roleId: "employee",
     permissionIds: ["view_library", "view_documents", "view_creator_ops", "view_resources"],
     createdById: "u1",
     status: "active",
@@ -682,22 +848,36 @@ const RESOURCES: ResourceItem[] = [];
 
 const ACTIVITY_LOG: ActivityEvent[] = [];
 
+// roles/departments/teams/documents/drive_documents/resources/activity have
+// no live table at all — always local, regardless of Supabase configuration
+// (only `users` and the hr_* tables actually go live; see reconcileSupabaseData).
 const roleStore: Role[] = [...ROLES];
 const userStore: User[] = configuredForSupabase ? [] : [...USERS];
-const departmentStore: Department[] = configuredForSupabase ? [] : [...DEPARTMENTS];
-const teamStore: Team[] = configuredForSupabase ? [] : [...TEAMS];
-const documentStore: Document[] = configuredForSupabase ? [] : [...DOCUMENTS];
+const departmentStore: Department[] = [...DEPARTMENTS];
+const teamStore: Team[] = [...TEAMS];
+const documentStore: Document[] = [...DOCUMENTS];
 
 const DRIVE_DOCUMENT_REFS: DriveDocumentReference[] = [];
 
-const driveDocumentStore: DriveDocumentReference[] = configuredForSupabase ? [] : [...DRIVE_DOCUMENT_REFS];
+const driveDocumentStore: DriveDocumentReference[] = [...DRIVE_DOCUMENT_REFS];
 const videoStore: VideoItem[] = [];
 const quickActionStore: QuickActionItem[] = [];
-const resourceStore: ResourceItem[] = configuredForSupabase ? [] : [...RESOURCES];
-const activityStore: ActivityEvent[] = configuredForSupabase ? [] : [...ACTIVITY_LOG];
+const resourceStore: ResourceItem[] = [...RESOURCES];
+const activityStore: ActivityEvent[] = [...ACTIVITY_LOG];
 const ingestionJobStore: IngestionJob[] = [];
 const ingestionResultStore: IngestionResult[] = [];
 const ingestionFailureStore: IngestionFailure[] = [];
+const hrOnboardingStore: OnboardingRecord[] = [];
+const hrLeaveRequestStore: LeaveRequest[] = [];
+const hrLeaveBalanceStore: LeaveBalance[] = [];
+const hrAttendanceStore: AttendanceRecord[] = [];
+const hrAttendanceAuditStore: AttendanceAuditEntry[] = [];
+const hrHolidayStore: Holiday[] = [];
+const hrProbationStore: ProbationRecord[] = [];
+const hrProbationNoteStore: ProbationNote[] = [];
+const hrManagerHistoryStore: ManagerHistoryEntry[] = [];
+const hrDeboardingStore: DeboardingRecord[] = [];
+const notificationStore: Notification[] = [];
 
 let supabaseHydrationStarted = false;
 let supabaseHydrationComplete = false;
@@ -747,119 +927,82 @@ async function hydrateSupabaseCache() {
   }
 
   try {
-    const [rolesRes, usersRes, docsRes, resourcesRes, driveDocsRes, activityRes, departmentsRes, teamsRes, videosRes, quickActionsRes, ingestionJobsRes, ingestionResultsRes, ingestionFailuresRes] = await Promise.all([
-      timedFetch("roles",             "Supabase roles fetch timed out."),
-      timedFetch("users",             "Supabase users fetch timed out."),
-      timedFetch("documents",         "Supabase documents fetch timed out."),
-      timedFetch("resources",         "Supabase resources fetch timed out."),
-      timedFetch("drive_documents",   "Supabase drive documents fetch timed out."),
-      timedFetch("activity_logs",     "Supabase activity logs fetch timed out."),
-      timedFetch("departments",       "Supabase departments fetch timed out."),
-      timedFetch("teams",             "Supabase teams fetch timed out."),
-      safeFetchSupabaseTable("videos"),
-      safeFetchSupabaseTable("quick_actions"),
-      timedFetch("ingestion_jobs",     "Supabase ingestion jobs fetch timed out."),
-      timedFetch("ingestion_results",  "Supabase ingestion results fetch timed out."),
-      timedFetch("ingestion_failures", "Supabase ingestion failures fetch timed out."),
+    // Only `users` and the hr_* tables have a live backing — see the header
+    // comment near legacySchemaLive. roles/departments/teams/documents/
+    // drive_documents/resources/activity_logs/videos/quick_actions/
+    // ingestion_* are deliberately never fetched from Supabase; their stores
+    // stay on local mock data unconditionally (see the store-init block above).
+    const [usersRes, hrOnboardingRes, hrLeaveRes, hrAttendanceRes, hrHolidaysRes, hrProbationRes, hrManagerHistoryRes, hrDeboardingRes, notificationsRes] = await Promise.all([
+      timedFetch("users", "Supabase users fetch timed out."),
+      safeFetchSupabaseTable("hr_onboarding"),
+      safeFetchSupabaseTable("hr_leave_requests"),
+      safeFetchSupabaseTable("hr_attendance"),
+      safeFetchSupabaseTable("hr_holidays"),
+      safeFetchSupabaseTable("hr_probation"),
+      safeFetchSupabaseTable("hr_manager_history"),
+      safeFetchSupabaseTable("hr_deboarding"),
+      safeFetchSupabaseTable("hr_notifications"),
     ]);
 
-    const requiredHydrationErrors = [
-      { name: "roles", result: rolesRes },
-      { name: "users", result: usersRes },
-      { name: "documents", result: docsRes },
-      { name: "resources", result: resourcesRes },
-      { name: "drive_documents", result: driveDocsRes },
-      { name: "activity_logs", result: activityRes },
-      { name: "departments", result: departmentsRes },
-      { name: "teams", result: teamsRes },
-    ].filter((entry) => entry.result.error !== null);
-
-    if (requiredHydrationErrors.length > 0) {
-      console.warn("Supabase hydration encountered errors", {
-        rolesError: rolesRes.error,
-        usersError: usersRes.error,
-        docsError: docsRes.error,
-        resourcesError: resourcesRes.error,
-        driveDocsError: driveDocsRes.error,
-        activityError: activityRes.error,
-        departmentsError: departmentsRes.error,
-        teamsError: teamsRes.error,
-      });
+    if (usersRes.error) {
+      console.warn("Supabase hydration encountered errors", { usersError: usersRes.error });
       supabaseAvailable = false;
       return;
     }
 
     const optionalHydrationIssues = [
-      { name: "videos", success: Array.isArray(videosRes) },
-      { name: "quick_actions", success: Array.isArray(quickActionsRes) },
-      { name: "ingestion_jobs", success: Array.isArray(ingestionJobsRes.data) },
-      { name: "ingestion_results", success: Array.isArray(ingestionResultsRes.data) },
-      { name: "ingestion_failures", success: Array.isArray(ingestionFailuresRes.data) },
+      { name: "hr_onboarding", success: Array.isArray(hrOnboardingRes) },
+      { name: "hr_leave_requests", success: Array.isArray(hrLeaveRes) },
+      { name: "hr_attendance", success: Array.isArray(hrAttendanceRes) },
+      { name: "hr_holidays", success: Array.isArray(hrHolidaysRes) },
+      { name: "hr_probation", success: Array.isArray(hrProbationRes) },
+      { name: "hr_manager_history", success: Array.isArray(hrManagerHistoryRes) },
+      { name: "hr_deboarding", success: Array.isArray(hrDeboardingRes) },
+      { name: "hr_notifications", success: Array.isArray(notificationsRes) },
     ].filter((entry) => !entry.success);
 
     if (optionalHydrationIssues.length > 0) {
       console.warn("Supabase hydration completed with optional table issues", {
         issues: optionalHydrationIssues.map((issue) => issue.name),
-        quickActionsPresent: Array.isArray(quickActionsRes),
-        videosPresent: Array.isArray(videosRes),
-        ingestionJobsError: ingestionJobsRes.error,
-        ingestionResultsError: ingestionResultsRes.error,
-        ingestionFailuresError: ingestionFailuresRes.error,
       });
     }
 
     supabaseAvailable = true;
 
-    if (Array.isArray(rolesRes.data)) {
-      roleStore.splice(0, roleStore.length, ...mergeEntitiesById(roleStore, mapSupabaseRows<Role>(rolesRes.data)));
-    }
-
     if (Array.isArray(usersRes.data)) {
-      userStore.splice(0, userStore.length, ...mergeEntitiesById(userStore, mapSupabaseRows<User>(usersRes.data)));
+      userStore.splice(0, userStore.length, ...mergeEntitiesById(userStore, usersRes.data.map(mapUserRow)));
     }
 
-    if (Array.isArray(docsRes.data)) {
-      documentStore.splice(0, documentStore.length, ...mergeEntitiesById(documentStore, mapSupabaseRows<Document>(docsRes.data)));
+    if (Array.isArray(hrOnboardingRes)) {
+      hrOnboardingStore.splice(0, hrOnboardingStore.length, ...mergeEntitiesById(hrOnboardingStore, mapSupabaseRows<OnboardingRecord>(hrOnboardingRes)));
     }
 
-    if (Array.isArray(resourcesRes.data)) {
-      resourceStore.splice(0, resourceStore.length, ...mergeEntitiesById(resourceStore, mapSupabaseRows<ResourceItem>(resourcesRes.data)));
+    if (Array.isArray(hrLeaveRes)) {
+      hrLeaveRequestStore.splice(0, hrLeaveRequestStore.length, ...mergeEntitiesById(hrLeaveRequestStore, mapSupabaseRows<LeaveRequest>(hrLeaveRes)));
     }
 
-    if (Array.isArray(driveDocsRes.data)) {
-      driveDocumentStore.splice(0, driveDocumentStore.length, ...mergeEntitiesById(driveDocumentStore, mapSupabaseRows<DriveDocumentReference>(driveDocsRes.data)));
+    if (Array.isArray(hrAttendanceRes)) {
+      hrAttendanceStore.splice(0, hrAttendanceStore.length, ...mergeEntitiesById(hrAttendanceStore, mapSupabaseRows<AttendanceRecord>(hrAttendanceRes)));
     }
 
-    if (Array.isArray(videosRes)) {
-      videoStore.splice(0, videoStore.length, ...mergeEntitiesById(videoStore, mapSupabaseRows<VideoItem>(videosRes)));
+    if (Array.isArray(hrHolidaysRes)) {
+      hrHolidayStore.splice(0, hrHolidayStore.length, ...mergeEntitiesById(hrHolidayStore, mapSupabaseRows<Holiday>(hrHolidaysRes)));
     }
 
-    if (Array.isArray(quickActionsRes)) {
-      quickActionStore.splice(0, quickActionStore.length, ...mergeEntitiesById(quickActionStore, mapSupabaseRows<QuickActionItem>(quickActionsRes)));
+    if (Array.isArray(hrProbationRes)) {
+      hrProbationStore.splice(0, hrProbationStore.length, ...mergeEntitiesById(hrProbationStore, mapSupabaseRows<ProbationRecord>(hrProbationRes)));
     }
 
-    if (Array.isArray(activityRes.data)) {
-      activityStore.splice(0, activityStore.length, ...mergeEntitiesById(activityStore, mapSupabaseRows<ActivityEvent>(activityRes.data)));
+    if (Array.isArray(hrManagerHistoryRes)) {
+      hrManagerHistoryStore.splice(0, hrManagerHistoryStore.length, ...mergeEntitiesById(hrManagerHistoryStore, mapSupabaseRows<ManagerHistoryEntry>(hrManagerHistoryRes)));
     }
 
-    if (Array.isArray(ingestionJobsRes.data)) {
-      ingestionJobStore.splice(0, ingestionJobStore.length, ...mergeEntitiesById(ingestionJobStore, mapSupabaseRows<IngestionJob>(ingestionJobsRes.data)));
+    if (Array.isArray(hrDeboardingRes)) {
+      hrDeboardingStore.splice(0, hrDeboardingStore.length, ...mergeEntitiesById(hrDeboardingStore, mapSupabaseRows<DeboardingRecord>(hrDeboardingRes)));
     }
 
-    if (Array.isArray(ingestionResultsRes.data)) {
-      ingestionResultStore.splice(0, ingestionResultStore.length, ...mergeEntitiesById(ingestionResultStore, mapSupabaseRows<IngestionResult>(ingestionResultsRes.data)));
-    }
-
-    if (Array.isArray(ingestionFailuresRes.data)) {
-      ingestionFailureStore.splice(0, ingestionFailureStore.length, ...mergeEntitiesById(ingestionFailureStore, mapSupabaseRows<IngestionFailure>(ingestionFailuresRes.data)));
-    }
-
-    if (Array.isArray(departmentsRes.data)) {
-      departmentStore.splice(0, departmentStore.length, ...mergeEntitiesById(departmentStore, mapSupabaseRows<Department>(departmentsRes.data)));
-    }
-
-    if (Array.isArray(teamsRes.data)) {
-      teamStore.splice(0, teamStore.length, ...mergeEntitiesById(teamStore, mapSupabaseRows<Team>(teamsRes.data)));
+    if (Array.isArray(notificationsRes)) {
+      notificationStore.splice(0, notificationStore.length, ...mergeEntitiesById(notificationStore, mapSupabaseRows<Notification>(notificationsRes)));
     }
     await reconcileSupabaseData();
   } catch (error) {
@@ -922,10 +1065,10 @@ export function getRoleById(id: RoleId) {
   }
 
   if (id) {
-    console.warn(`Role lookup failed for '${id}', falling back to '${ROLE_IDS.EMPLOYEE}'.`);
+    console.warn(`Role lookup failed for '${id}', falling back to '${DEFAULT_ROLE_ID}'.`);
   }
 
-  return roleStore.find((role) => role.id === ROLE_IDS.EMPLOYEE) ?? roleStore[0] ?? null;
+  return roleStore.find((role) => role.id === DEFAULT_ROLE_ID) ?? roleStore[0] ?? null;
 }
 
 export function saveRole(role: Role) {
@@ -980,6 +1123,22 @@ export function getUserById(id: string) {
   return userStore.find((user) => user.id === id);
 }
 
+/**
+ * Registers an MVP/role-picker demo user in the in-memory user store only —
+ * never synced to Supabase. Lets the rest of the write path (which re-resolves
+ * the actor via getUserById) recognize a local-only identity that was never
+ * persisted, without weakening the checks themselves.
+ */
+export function registerLocalUser(user: User) {
+  const existing = userStore.find((u) => u.id === user.id);
+  if (existing) {
+    Object.assign(existing, user);
+  } else {
+    userStore.unshift(user);
+  }
+  return user;
+}
+
 export function getUserByRoleId(roleId: RoleId) {
   ensureSupabaseHydration();
   return userStore.find((user) => user.roleId === roleId);
@@ -1014,7 +1173,9 @@ export function saveDriveDocumentReference(document: DriveDocumentReference) {
   }
 
   if (isSupabaseAvailable()) {
-    void safeSupabaseWrite(() => supabase.from("drive_documents").upsert(createUpsertPayload(document), { onConflict: "legacy_id" }));
+    const payload = createUpsertPayload(document) as unknown as Record<string, unknown>;
+    const { documentVersionId, ...payloadWithoutVersion } = payload;
+    void safeSupabaseWrite(() => supabase.from("drive_documents").upsert(payloadWithoutVersion, { onConflict: "legacy_id" }));
   }
   notifyDataChange();
   return existing || document;
@@ -1077,6 +1238,66 @@ export function getResourceById(id: string) {
 export function getActivityEvents() {
   ensureSupabaseHydration();
   return activityStore;
+}
+
+export function getOnboardingRecords() {
+  ensureSupabaseHydration();
+  return hrOnboardingStore;
+}
+
+export function getOnboardingRecordById(id: string) {
+  ensureSupabaseHydration();
+  return hrOnboardingStore.find((record) => record.id === id);
+}
+
+export function getLeaveRequests() {
+  ensureSupabaseHydration();
+  return hrLeaveRequestStore;
+}
+
+export function getLeaveRequestById(id: string) {
+  ensureSupabaseHydration();
+  return hrLeaveRequestStore.find((request) => request.id === id);
+}
+
+export function getAttendanceRecords() {
+  ensureSupabaseHydration();
+  return hrAttendanceStore;
+}
+
+export function getHolidays() {
+  ensureSupabaseHydration();
+  return hrHolidayStore;
+}
+
+export function getProbationRecords() {
+  ensureSupabaseHydration();
+  return hrProbationStore;
+}
+
+export function getProbationRecordById(id: string) {
+  ensureSupabaseHydration();
+  return hrProbationStore.find((record) => record.id === id);
+}
+
+export function getManagerHistory() {
+  ensureSupabaseHydration();
+  return hrManagerHistoryStore;
+}
+
+export function getDeboardingRecords() {
+  ensureSupabaseHydration();
+  return hrDeboardingStore;
+}
+
+export function getDeboardingRecordById(id: string) {
+  ensureSupabaseHydration();
+  return hrDeboardingStore.find((record) => record.id === id);
+}
+
+export function getNotifications() {
+  ensureSupabaseHydration();
+  return notificationStore;
 }
 
 export function getIngestionJobs() {
@@ -1187,6 +1408,231 @@ export function saveActivity(event: ActivityEvent) {
   }
   notifyDataChange();
   return event;
+}
+
+export function saveOnboardingRecord(record: OnboardingRecord) {
+  const existing = getOnboardingRecordById(record.id);
+  if (existing) {
+    Object.assign(existing, record);
+  } else {
+    hrOnboardingStore.unshift(record);
+  }
+
+  if (isSupabaseAvailable()) {
+    void safeSupabaseWrite(() => supabase.from("hr_onboarding").upsert(toHrOnboardingRow(record), { onConflict: "legacy_id" }));
+  }
+  notifyDataChange();
+  return existing || record;
+}
+
+export function saveLeaveRequest(request: LeaveRequest) {
+  const existing = getLeaveRequestById(request.id);
+  if (existing) {
+    Object.assign(existing, request);
+  } else {
+    hrLeaveRequestStore.unshift(request);
+  }
+
+  if (isSupabaseAvailable()) {
+    void safeSupabaseWrite(() => supabase.from("hr_leave_requests").upsert(toLeaveRequestRow(request), { onConflict: "legacy_id" }));
+  }
+  notifyDataChange();
+  return existing || request;
+}
+
+export function saveAttendanceRecord(record: AttendanceRecord) {
+  const existing = hrAttendanceStore.find((r) => r.id === record.id);
+  if (existing) {
+    Object.assign(existing, record);
+  } else {
+    hrAttendanceStore.unshift(record);
+  }
+
+  if (isSupabaseAvailable()) {
+    void safeSupabaseWrite(() => supabase.from("hr_attendance").upsert(toAttendanceRow(record), { onConflict: "legacy_id" }));
+  }
+  notifyDataChange();
+  return existing || record;
+}
+
+export function saveHoliday(holiday: Holiday) {
+  const existing = hrHolidayStore.find((h) => h.id === holiday.id);
+  if (existing) {
+    Object.assign(existing, holiday);
+  } else {
+    hrHolidayStore.unshift(holiday);
+  }
+
+  if (isSupabaseAvailable()) {
+    void safeSupabaseWrite(() => supabase.from("hr_holidays").upsert(toHolidayRow(holiday), { onConflict: "legacy_id" }));
+  }
+  notifyDataChange();
+  return existing || holiday;
+}
+
+export function saveProbationRecord(record: ProbationRecord) {
+  const existing = getProbationRecordById(record.id);
+  if (existing) {
+    Object.assign(existing, record);
+  } else {
+    hrProbationStore.unshift(record);
+  }
+
+  if (isSupabaseAvailable()) {
+    void safeSupabaseWrite(() => supabase.from("hr_probation").upsert(toProbationRow(record), { onConflict: "legacy_id" }));
+  }
+  notifyDataChange();
+  return existing || record;
+}
+
+export function saveManagerHistoryEntry(entry: ManagerHistoryEntry) {
+  hrManagerHistoryStore.unshift(entry);
+
+  if (isSupabaseAvailable()) {
+    void safeSupabaseWrite(() => supabase.from("hr_manager_history").upsert(toManagerHistoryRow(entry), { onConflict: "legacy_id" }));
+  }
+  notifyDataChange();
+  return entry;
+}
+
+export function saveDeboardingRecord(record: DeboardingRecord) {
+  const existing = getDeboardingRecordById(record.id);
+  if (existing) {
+    Object.assign(existing, record);
+  } else {
+    hrDeboardingStore.unshift(record);
+  }
+
+  if (isSupabaseAvailable()) {
+    void safeSupabaseWrite(() => supabase.from("hr_deboarding").upsert(toDeboardingRow(record), { onConflict: "legacy_id" }));
+  }
+  notifyDataChange();
+  return existing || record;
+}
+
+export function saveNotification(notification: Notification) {
+  const existing = notificationStore.find((n) => n.id === notification.id);
+  if (existing) {
+    Object.assign(existing, notification);
+  } else {
+    notificationStore.unshift(notification);
+  }
+
+  if (isSupabaseAvailable()) {
+    void safeSupabaseWrite(() => supabase.from("notifications").upsert(toNotificationRow(notification), { onConflict: "legacy_id" }));
+  }
+  notifyDataChange();
+  return existing || notification;
+}
+
+// ─── Leave Balances ──────────────────────────────────────────────────────────
+
+export function getLeaveBalances(): LeaveBalance[] {
+  ensureSupabaseHydration();
+  return hrLeaveBalanceStore;
+}
+
+export function getLeaveBalanceById(id: string): LeaveBalance | undefined {
+  return hrLeaveBalanceStore.find((b) => b.id === id);
+}
+
+export function getLeaveBalancesForUser(userId: string): LeaveBalance[] {
+  ensureSupabaseHydration();
+  return hrLeaveBalanceStore.filter((b) => b.userId === userId);
+}
+
+export function saveLeaveBalance(balance: LeaveBalance): LeaveBalance {
+  const existing = hrLeaveBalanceStore.find((b) => b.id === balance.id);
+  if (existing) {
+    Object.assign(existing, balance);
+  } else {
+    hrLeaveBalanceStore.unshift(balance);
+  }
+  if (isSupabaseAvailable()) {
+    void safeSupabaseWrite(() =>
+      supabase.from("hr_leave_balances").upsert(
+        { legacy_id: balance.id, user_legacy_id: balance.userId, year: balance.year, leave_type: balance.leaveType, total_allocated: balance.totalAllocated, used: balance.used, updated_at: balance.updatedAt },
+        { onConflict: "legacy_id" },
+      ),
+    );
+  }
+  notifyDataChange();
+  return existing ?? balance;
+}
+
+// ─── Attendance Audit ────────────────────────────────────────────────────────
+
+export function getAttendanceAuditEntries(): AttendanceAuditEntry[] {
+  ensureSupabaseHydration();
+  return hrAttendanceAuditStore;
+}
+
+export function getAttendanceAuditForRecord(recordId: string): AttendanceAuditEntry[] {
+  ensureSupabaseHydration();
+  return hrAttendanceAuditStore.filter((e) => e.attendanceRecordId === recordId);
+}
+
+export function saveAttendanceAuditEntry(entry: AttendanceAuditEntry): AttendanceAuditEntry {
+  hrAttendanceAuditStore.unshift(entry);
+  if (isSupabaseAvailable()) {
+    void safeSupabaseWrite(() =>
+      supabase.from("hr_attendance_audit").insert({
+        legacy_id:            entry.id,
+        attendance_record_id: entry.attendanceRecordId,
+        user_legacy_id:       entry.userId,
+        changed_by_id:        entry.changedById,
+        date:                 entry.date,
+        previous_status:      entry.previousStatus,
+        new_status:           entry.newStatus,
+        reason:               entry.reason,
+        created_at:           entry.createdAt,
+      }),
+    );
+  }
+  notifyDataChange();
+  return entry;
+}
+
+// ─── Probation Notes ─────────────────────────────────────────────────────────
+
+export function getProbationNotes(): ProbationNote[] {
+  ensureSupabaseHydration();
+  return hrProbationNoteStore;
+}
+
+export function getProbationNotesForRecord(recordId: string): ProbationNote[] {
+  ensureSupabaseHydration();
+  return hrProbationNoteStore.filter((n) => n.probationRecordId === recordId);
+}
+
+export function saveProbationNote(note: ProbationNote): ProbationNote {
+  hrProbationNoteStore.unshift(note);
+  if (isSupabaseAvailable()) {
+    void safeSupabaseWrite(() =>
+      supabase.from("hr_probation_notes").insert({
+        legacy_id:           note.id,
+        probation_record_id: note.probationRecordId,
+        author_id:           note.authorId,
+        note:                note.note,
+        note_type:           note.noteType,
+        created_at:          note.createdAt,
+      }),
+    );
+  }
+  notifyDataChange();
+  return note;
+}
+
+export function deleteHoliday(holidayId: string) {
+  const index = hrHolidayStore.findIndex((holiday) => holiday.id === holidayId);
+  if (index === -1) return false;
+  hrHolidayStore.splice(index, 1);
+
+  if (isSupabaseAvailable()) {
+    void safeSupabaseWrite(() => supabase.from("hr_holidays").delete().eq("legacy_id", holidayId));
+  }
+  notifyDataChange();
+  return true;
 }
 
 export function getVideos() {
@@ -1374,7 +1820,7 @@ export function saveUser(user: User) {
   }
 
   if (isSupabaseAvailable()) {
-    void safeSupabaseWrite(() => supabase.from("users").upsert(createUpsertPayload(user), { onConflict: "legacy_id" }));
+    void safeSupabaseWrite(() => supabase.from("users").upsert({ ...createUpsertPayload(user), date_joined: user.dateJoined ?? null }, { onConflict: "legacy_id" }));
   }
   notifyDataChange();
   return existing || user;

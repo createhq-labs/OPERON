@@ -1,71 +1,92 @@
+"use client";
+
 import type { AlertBlock } from "@/renderers/types";
 
-const ALERT_STYLES: Record<
+const VARIANTS: Record<
   string,
-  { border: string; bg: string; label: string; labelColor: string }
+  { bar: string; label: string; labelColor: string; bg: string }
 > = {
   warning: {
-    border: "rgba(245, 166, 35, 0.3)",
-    bg: "rgba(245, 166, 35, 0.08)",
-    label: "Warning",
-    labelColor: "var(--accent)",
+    bar:        "var(--op-accent)",
+    label:      "Warning",
+    labelColor: "var(--op-accent)",
+    bg:         "rgba(245, 166, 35, 0.06)",
   },
   note: {
-    border: "rgba(255, 255, 255, 0.12)",
-    bg: "var(--surface-2)",
-    label: "Note",
-    labelColor: "rgba(255, 255, 255, 0.6)",
+    bar:        "rgba(255, 255, 255, 0.20)",
+    label:      "Note",
+    labelColor: "var(--op-text-2)",
+    bg:         "transparent",
   },
   callout: {
-    border: "rgba(255, 255, 255, 0.12)",
-    bg: "var(--surface-2)",
-    label: "Callout",
-    labelColor: "rgba(255, 255, 255, 0.6)",
+    bar:        "rgba(255, 255, 255, 0.20)",
+    label:      "Callout",
+    labelColor: "var(--op-text-2)",
+    bg:         "transparent",
   },
   success: {
-    border: "rgba(52, 199, 89, 0.3)",
-    bg: "rgba(52, 199, 89, 0.08)",
-    label: "Success",
-    labelColor: "#34C759",
+    bar:        "rgba(74, 222, 128, 0.70)",
+    label:      "Success",
+    labelColor: "var(--color-success)",
+    bg:         "rgba(74, 222, 128, 0.05)",
   },
 };
 
 export function renderAlert(block: AlertBlock, _index: number) {
-  const styles = ALERT_STYLES[block.type] ?? ALERT_STYLES.note;
-  const displayTitle = block.title ?? styles.label;
+  const v = VARIANTS[block.type] ?? VARIANTS.note;
+  const displayTitle = block.title ?? v.label;
 
   return (
     <div
       style={{
+        display:      "grid",
+        gridTemplateColumns: "3px 1fr",
+        gap:          "20px",
         borderRadius: "var(--r-lg)",
-        border: `1px solid ${styles.border}`,
-        background: styles.bg,
-        padding: "16px 20px",
+        background:   v.bg,
+        border:       "1px solid var(--op-border)",
+        overflow:     "hidden",
+        padding:      "0",
       }}
     >
+      {/* Left accent bar */}
       <div
+        aria-hidden="true"
         style={{
-          fontFamily: "var(--font-ui)",
-          fontSize: "12px",
-          fontWeight: 600,
-          letterSpacing: "0.06em",
-          textTransform: "uppercase",
-          color: styles.labelColor,
+          background:   v.bar,
+          borderRadius: "0",
+          width:        "3px",
+          alignSelf:    "stretch",
         }}
-      >
-        {displayTitle}
+      />
+
+      {/* Content */}
+      <div style={{ padding: "16px 20px 16px 0" }}>
+        <div
+          style={{
+            fontFamily:    "var(--font-ui)",
+            fontSize:      "var(--text-11)",
+            fontWeight:    700,
+            letterSpacing: "0.08em",
+            textTransform: "uppercase",
+            color:         v.labelColor,
+            marginBottom:  "6px",
+          }}
+        >
+          {displayTitle}
+        </div>
+        <p
+          style={{
+            fontFamily: "var(--font-body)",
+            fontSize:   "var(--text-14)",
+            lineHeight: 1.7,
+            color:      "var(--op-text-2)",
+            margin:     0,
+          }}
+        >
+          {block.content}
+        </p>
       </div>
-      <p
-        style={{
-          marginTop: "8px",
-          fontFamily: "var(--font-body)",
-          fontSize: "14px",
-          lineHeight: "1.6",
-          color: "var(--text-2)",
-        }}
-      >
-        {block.content}
-      </p>
     </div>
   );
 }

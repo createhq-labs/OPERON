@@ -1,7 +1,7 @@
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { withTimeout } from "@/lib/async";
 import type { User, UserType, DeptId, PermissionId, UserStatus } from "@/core/types";
-import { ROLE_IDS } from "@/core/roles";
+import { DEFAULT_ROLE_ID } from "@/core/roles";
 import { logRuntimeWarning } from "@/services/observability/runtimeLogger";
 
 // ─── Bootstrap Auth ───────────────────────────────────────────────────────────
@@ -90,41 +90,29 @@ export class SupabaseAuthAdapter implements AuthAdapter {
   }
 
   /**
-   * Maps a raw Supabase `users` row to the domain User type.
-   * All fields are coerced defensively — a partial row must never
-   * produce an object that passes RBAC checks with elevated privileges.
+   * Maps a raw public.users row (the Finance Dashboard's real identity
+   * table — full_name/role/business_line/team_lead_id/team_name, real uuid
+   * `id`, no permission_ids column) to the domain User type. All fields are
+   * coerced defensively — a partial row must never produce an object that
+   * passes RBAC checks with elevated privileges.
    */
   private mapSupabaseUser(row: Record<string, unknown>): User {
     return {
       id: coerceString(row.id),
       name:
-        coerceString(row.name) ||
         coerceString(row.full_name) ||
         normalizeEmail(row.email as string | undefined),
       email: normalizeEmail(row.email as string | undefined),
-      avatar:
-        coerceString(row.avatar) || coerceString(row.avatar_url),
+      avatar: "",
       userType: coerceString(row.user_type, "employee") as UserType,
-      roleId:
-        coerceString(row.role_legacy_id) ||
-        coerceString(row.roleId) ||
-        ROLE_IDS.EMPLOYEE,
-      departmentId: (
-         coerceString(row.department_legacy_id) ||
-         coerceString(row.departmentId) ||
-         undefined
-        ) as DeptId | undefined,
-      teamId:
-        coerceString(row.team_legacy_id) ||
-        coerceString(row.teamId) ||
-        undefined,
-      supervisorId:
-        coerceString(row.supervisor_legacy_id) ||
-        coerceString(row.supervisorId) ||
-        undefined,
+      roleId: coerceString(row.role) || DEFAULT_ROLE_ID,
+      departmentId: (coerceString(row.business_line) || undefined) as DeptId | undefined,
+      teamId: coerceString(row.team_name) || undefined,
+      supervisorId: coerceString(row.team_lead_id) || undefined,
       permissionIds: coerceStringArray(row.permission_ids) as PermissionId[],
-      createdById: coerceString(row.created_by_id),
+      createdById: coerceString(row.created_by),
       status: coerceString(row.status, "active") as UserStatus,
+      dateJoined: coerceString(row.date_joined) || undefined,
     };
   }
 
@@ -176,11 +164,15 @@ export class SupabaseAuthAdapter implements AuthAdapter {
 
       if (session?.userId && session.email) {
         // 1. Look up existing profile by auth user ID.
-        const { data: existing, error: selectError } = await supabase
-          .from("users")
-          .select("*")
-          .eq("auth_user_id", session.userId)
-          .single();
+        const { data: existing, error: selectError } = await withTimeout(
+          supabase
+            .from("users")
+            .select("*")
+            .eq("auth_user_id", session.userId)
+            .single(),
+          AUTH_TIMEOUT_MS,
+          { data: null, error: { code: "AUTH_TIMEOUT", message: "User profile lookup timed out." } } as never,
+        );
 
         // PGRST116 = row not found — expected on first login. Everything else
         // is a real error.
@@ -195,22 +187,22 @@ export class SupabaseAuthAdapter implements AuthAdapter {
         }
 
         // 2. First login: create a default employee profile.
-        const { data: created, error: insertError } = await supabase
-          .from("users")
-          .insert({
-            legacy_id: session.userId,
-            auth_user_id: session.userId,
-            email: session.email,
-            name: session.email,
-            avatar: "",
-            user_type: "employee",
-            role_legacy_id: ROLE_IDS.EMPLOYEE,
-            permission_ids: [],
-            created_by_id: session.userId,
-            status: "active",
-          })
-          .select("*")
-          .single();
+        const { data: created, error: insertError } = await withTimeout(
+          supabase
+            .from("users")
+            .insert({
+              auth_user_id: session.userId,
+              email: session.email,
+              full_name: session.email,
+              user_type: "employee",
+              role: DEFAULT_ROLE_ID,
+              status: "active",
+            })
+            .select("*")
+            .single(),
+          AUTH_TIMEOUT_MS,
+          { data: null, error: { message: "User profile creation timed out." } } as never,
+        );
 
         if (insertError) {
           logRuntimeWarning("Failed to create user profile", {

@@ -1,11 +1,17 @@
-import type { ParserResult } from "@/services/parser/types";
+import type { ParserResult, DriveDocumentPayload } from "@/services/parser/types";
 import type { ParserProvider } from "@/services/parser/baseParser";
-import { getParserByExtension, getParserByMimeType, resolveParser, listRegisteredParsers } from "@/services/parser/registry";
+import type { ParserHandler } from "@/services/parser/registry";
+import {
+  getParserByExtension,
+  getParserByMimeType,
+  resolveParser,
+  listRegisteredParsers,
+} from "@/services/parser/registry";
 
 export interface ParserSelectionOptions {
   parserType?: string;
-  mimeType?: string;
-  fileName?: string;
+  mimeType?:   string;
+  fileName?:   string;
 }
 
 export interface ParserSelectionResult {
@@ -13,46 +19,53 @@ export interface ParserSelectionResult {
   reason: string;
 }
 
+// ---------------------------------------------------------------------------
+// Parser selection
+// ---------------------------------------------------------------------------
+
 export function selectParser(options: ParserSelectionOptions): ParserProvider {
   const { parserType, mimeType, fileName } = options;
-  const resolvedByType = parserType ? resolveParser(parserType) : undefined;
-  if (resolvedByType) {
-    return {
-      ...resolvedByType,
-      parserType: resolvedByType.parserType,
-    };
+
+  if (parserType) {
+    const byType = resolveParser(parserType);
+    if (byType) return byType;
   }
 
-  const byMime = getParserByMimeType(mimeType);
-  if (byMime) {
-    return {
-      ...byMime,
-      parserType: byMime.parserType,
-    };
+  if (mimeType) {
+    const byMime = getParserByMimeType(mimeType);
+    if (byMime) return byMime;
   }
 
   const extension = fileName?.split(".").pop()?.toLowerCase();
-  const byExt = getParserByExtension(extension);
-  if (byExt) {
-    return {
-      ...byExt,
-      parserType: byExt.parserType,
-    };
+  if (extension) {
+    const byExt = getParserByExtension(extension);
+    if (byExt) return byExt;
   }
 
   const fallback = resolveParser("plainText");
   if (!fallback) {
-    throw new Error("Plain text parser is not registered.");
+    throw new Error(
+      "Plain text parser is not registered. Ensure registerParsers() has been called."
+    );
   }
 
-  return {
-    ...fallback,
-    parserType: fallback.parserType,
-  };
+  return fallback;
 }
 
-export async function parseUploadedDocument(file: File, parserType?: string): Promise<ParserResult> {
-  const parser = selectParser({ parserType, mimeType: file.type, fileName: file.name });
+// ---------------------------------------------------------------------------
+// Upload parsing
+// ---------------------------------------------------------------------------
+
+export async function parseUploadedDocument(
+  file: File,
+  parserType?: string
+): Promise<ParserResult> {
+  const parser = selectParser({
+    parserType,
+    mimeType: file.type,
+    fileName: file.name,
+  });
+
   if (parser.parseUploadedFile) {
     return parser.parseUploadedFile(file);
   }
@@ -65,15 +78,26 @@ export async function parseUploadedDocument(file: File, parserType?: string): Pr
   throw new Error("No parser available for the uploaded document.");
 }
 
-export function parseDriveDocument(document: any): ParserResult {
+// ---------------------------------------------------------------------------
+// Drive parsing
+// ---------------------------------------------------------------------------
+
+export function parseDriveDocument(
+  document: DriveDocumentPayload
+): ParserResult {
   const parser = resolveParser("googleDrive");
   if (parser?.parseDriveDocument) {
     return parser.parseDriveDocument(document);
   }
-
-  throw new Error("No Google Drive parser available.");
+  throw new Error(
+    "No Google Drive parser available. Ensure registerParsers() has been called."
+  );
 }
 
-export function listParsers() {
+// ---------------------------------------------------------------------------
+// Registry inspection
+// ---------------------------------------------------------------------------
+
+export function listParsers(): ParserHandler[] {
   return listRegisteredParsers();
 }

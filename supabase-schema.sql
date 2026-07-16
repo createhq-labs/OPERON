@@ -54,6 +54,7 @@ create table users (
   permission_ids       text[]      not null default '{}',
   created_by_id        text,
   status               text        not null default 'active',
+  date_joined          date,
   created_at           timestamptz not null default now(),
   updated_at           timestamptz not null default now(),
 
@@ -407,6 +408,197 @@ create index if not exists idx_ingestion_failures_job      on ingestion_failures
 create index if not exists idx_ingestion_failures_document on ingestion_failures (document_id);
 
 -- ============================================================
+-- HR — ONBOARDING
+-- ============================================================
+
+create table hr_onboarding (
+  id                 uuid        primary key default gen_random_uuid(),
+  legacy_id          text        not null unique,
+  user_legacy_id     text        not null,
+  status             text        not null default 'pending',
+  onboarding_data    jsonb       not null default '{}',
+  compliance_data    jsonb       not null default '{}',
+  form11_sent_at     timestamptz,
+  submitted_at       timestamptz,
+  acknowledged_by_id text,
+  acknowledged_at    timestamptz,
+  completed_by_id    text,
+  completed_at       timestamptz,
+  rejected_by_id     text,
+  rejected_at        timestamptz,
+  rejection_reason   text,
+  created_at         timestamptz not null default now(),
+
+  constraint chk_onboarding_status check (status in ('pending', 'submitted', 'acknowledged', 'completed'))
+);
+
+-- ============================================================
+-- HR — LEAVE & WFH REQUESTS
+-- ============================================================
+
+create table hr_leave_requests (
+  id                 uuid        primary key default gen_random_uuid(),
+  legacy_id          text        not null unique,
+  user_legacy_id     text        not null,
+  request_type       text        not null,
+  date_from          date        not null,
+  date_to            date        not null,
+  reason             text        not null default '',
+  additional_info    text,
+  status             text        not null default 'pending',
+  rejection_reason   text,
+  tl_approved_by_id  text,
+  tl_approved_at     timestamptz,
+  hr_approved_by_id  text,
+  hr_approved_at     timestamptz,
+  founder_notified   boolean     not null default false,
+  created_at         timestamptz not null default now(),
+  updated_at         timestamptz not null default now(),
+
+  constraint chk_leave_request_type check (request_type in ('leave', 'wfh')),
+  constraint chk_leave_status       check (status in ('pending', 'tl_approved', 'cofounder_pending', 'hr_approved', 'rejected', 'cancelled'))
+);
+
+-- ============================================================
+-- HR — ATTENDANCE
+-- ============================================================
+
+-- Day-level register: `days` maps day-of-month ("1".."31") to
+-- 'present' | 'leave' | 'wfh'. Totals are derived at read time, never
+-- stored, so they can't drift from the underlying marks.
+create table hr_attendance (
+  id                  uuid        primary key default gen_random_uuid(),
+  legacy_id           text        not null unique,
+  user_legacy_id      text        not null,
+  month               text        not null,
+  days                jsonb       not null default '{}',
+  created_at          timestamptz not null default now(),
+  updated_at          timestamptz not null default now(),
+
+  constraint uq_attendance_user_month unique (user_legacy_id, month)
+);
+
+-- ============================================================
+-- HR — HOLIDAY CALENDAR
+-- ============================================================
+
+create table hr_holidays (
+  id                 uuid        primary key default gen_random_uuid(),
+  legacy_id          text        not null unique,
+  date               date        not null unique,
+  name               text        not null,
+  type               text        not null default 'public',
+  created_by_id      text,
+  created_at         timestamptz not null default now(),
+  updated_at         timestamptz not null default now(),
+
+  constraint chk_holiday_type check (type in ('public', 'optional', 'company'))
+);
+
+-- ============================================================
+-- HR — PROBATION
+-- ============================================================
+
+create table hr_probation (
+  id                       uuid        primary key default gen_random_uuid(),
+  legacy_id                text        not null unique,
+  user_legacy_id           text        not null,
+  date_joined              date        not null,
+  probation_duration_days  integer     not null default 90,
+  probation_duration_unit  text        not null default 'days',
+  expected_review_date     date,
+  status                   text        not null default 'pending',
+  reviewed_by_id           text,
+  reviewed_at              timestamptz,
+  parent_record_id         text,
+  notes                    text,
+  submitted_by_id          text        not null,
+  created_at               timestamptz not null default now(),
+
+  constraint chk_probation_status check (status in ('pending', 'under_review', 'confirmed', 'extended', 'terminated')),
+  constraint chk_probation_duration_unit check (probation_duration_unit in ('days', 'months'))
+);
+
+-- ============================================================
+-- HR — MANAGER HISTORY
+-- ============================================================
+-- One row per reporting-manager change, so past attendance/leave history can
+-- resolve "who was the manager on date X" instead of overwriting it.
+
+create table hr_manager_history (
+  id                   uuid        primary key default gen_random_uuid(),
+  legacy_id            text        not null unique,
+  user_legacy_id       text        not null,
+  supervisor_legacy_id text,
+  changed_by_id        text        not null,
+  effective_from       date        not null,
+  created_at           timestamptz not null default now()
+);
+
+-- ============================================================
+-- HR — DEBOARDING
+-- ============================================================
+
+create table hr_deboarding (
+  id                    uuid        primary key default gen_random_uuid(),
+  legacy_id             text        not null unique,
+  user_legacy_id        text        not null,
+  initiated_by_id       text        not null,
+  track                 text        not null,
+  status                text        not null default 'pending_lead_approval',
+  reason                text,
+  initiated_at          timestamptz not null default now(),
+  approved_by_id        text,
+  approved_at           timestamptz,
+  hr_acknowledged_by_id text,
+  hr_acknowledged_at    timestamptz,
+  founder_approved_by_id text,
+  founder_approved_at   timestamptz,
+  checklist             jsonb       not null default '{}',
+  completed_by_id       text,
+  completed_at          timestamptz,
+  founder_notified      boolean     not null default false,
+  created_at            timestamptz not null default now(),
+
+  constraint chk_deboarding_track  check (track in ('creator', 'employee')),
+  constraint chk_deboarding_status check (status in ('pending_lead_approval', 'pending_founder_approval', 'data_recovery_pending', 'offboarded'))
+);
+
+-- ============================================================
+-- NOTIFICATIONS
+-- ============================================================
+
+create table notifications (
+  id                     uuid        primary key default gen_random_uuid(),
+  legacy_id              text        not null unique,
+  title                  text        not null,
+  body                   text        not null,
+  notification_type      text        not null,
+  audience               text        not null,
+  department_ids         text[]      default null,
+  role_ids               text[]      default null,
+  user_ids               text[]      default null,
+  metadata               jsonb       default '{}',
+  created_at             timestamptz not null default now(),
+  expires_at             timestamptz,
+  unread_by              text[]      not null default '{}',
+
+  constraint chk_notification_type check (notification_type in ('system', 'document', 'resource', 'user')),
+  constraint chk_notification_audience check (audience in ('all', 'department', 'role', 'user'))
+);
+
+create index if not exists idx_hr_onboarding_user      on hr_onboarding (user_legacy_id);
+create index if not exists idx_hr_leave_user           on hr_leave_requests (user_legacy_id);
+create index if not exists idx_hr_leave_status         on hr_leave_requests (status);
+create index if not exists idx_hr_attendance_user      on hr_attendance (user_legacy_id);
+create index if not exists idx_hr_probation_user       on hr_probation (user_legacy_id);
+create index if not exists idx_hr_deboarding_user      on hr_deboarding (user_legacy_id);
+create index if not exists idx_hr_deboarding_status    on hr_deboarding (status);
+create index if not exists idx_notifications_role_ids  on notifications using gin (role_ids);
+create index if not exists idx_notifications_user_ids  on notifications using gin (user_ids);
+create index if not exists idx_notifications_dept_ids  on notifications using gin (department_ids);
+
+-- ============================================================
 -- ROW-LEVEL SECURITY
 -- Use the dedicated policy files in supabase/policies/ for the
 -- complete, authoritative policy set. The policies below are the
@@ -455,6 +647,27 @@ alter table drive_documents enable row level security;
 
 -- drive_accounts: see supabase/policies/drive_accounts.sql (deprecated)
 alter table drive_accounts enable row level security;
+
+-- hr_onboarding: see supabase/policies/hr_onboarding.sql
+alter table hr_onboarding enable row level security;
+
+-- hr_leave_requests: see supabase/policies/hr_leave_requests.sql
+alter table hr_leave_requests enable row level security;
+
+-- hr_attendance: see supabase/policies/hr_attendance.sql
+alter table hr_attendance enable row level security;
+
+-- hr_holidays: see supabase/policies/hr_holidays.sql
+alter table hr_holidays enable row level security;
+
+-- hr_probation: see supabase/policies/hr_probation.sql
+alter table hr_probation enable row level security;
+
+-- hr_deboarding: see supabase/policies/hr_deboarding.sql
+alter table hr_deboarding enable row level security;
+
+-- notifications: see supabase/policies/notifications.sql
+alter table notifications enable row level security;
 
 -- videos: any authenticated user may read
 alter table videos enable row level security;

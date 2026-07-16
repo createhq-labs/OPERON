@@ -54,8 +54,12 @@ export function DrivePanel({
   const [accounts, setAccounts] = useState<DriveAccount[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
-  const [connectStatus, setConnectStatus] = useState("");
   const [disconnectingId, setDisconnectingId] = useState<string | null>(null);
+  const [connectorStatus, setConnectorStatus] = useState<{
+    connected: boolean;
+    provider: string;
+    message: string;
+  } | null>(null);
 
   const canManageDrive =
     user.roleId === "role_cofounder" ||
@@ -68,6 +72,11 @@ export function DrivePanel({
     try {
       const status = await getDriveConnectorStatus();
       setAccounts(status.accounts || []);
+      setConnectorStatus({
+        connected: Boolean(status.connected),
+        provider: status.provider || "google",
+        message: status.message || "",
+      });
       setError("");
     } catch {
       setError("Failed to load Drive status");
@@ -92,23 +101,19 @@ export function DrivePanel({
       setError("No permission");
       return;
     }
-    setConnectStatus("Connecting…");
     setError("");
     try {
       const result = await connectDrive();
       if (result.connected) {
-        setConnectStatus("");
         setTimeout(() => {
           loadStatus();
           loadDiagnostics();
         }, 1500);
       } else {
-        setConnectStatus("");
         setError(result.message);
       }
-    } catch (err) {
+    } catch (_err) {
       setError("Connection failed");
-      setConnectStatus("");
     }
   };
 
@@ -120,7 +125,7 @@ export function DrivePanel({
       await disconnectDrive(accountId);
       await loadStatus();
       await loadDiagnostics();
-    } catch (err) {
+    } catch (_err) {
       setError("Disconnect failed");
     } finally {
       setDisconnectingId(null);
@@ -134,15 +139,16 @@ export function DrivePanel({
     try {
       await syncDrive(mode);
       await loadDiagnostics();
-    } catch (err) {
+    } catch (_err) {
       setError("Sync failed");
     } finally {
       setSyncing(false);
     }
   };
 
-  const isLocalMode = driveDiagnostics?.providerMode === "local";
   const hasAccounts = accounts.length > 0;
+  const isLocalMode = connectorStatus?.provider === "local";
+  const showSyncActions = hasAccounts || (isLocalMode && connectorStatus?.connected);
   const failedCount = driveDiagnostics?.ingestion.failed ?? 0;
 
   return (
@@ -166,6 +172,20 @@ export function DrivePanel({
           <p className="text-text-secondary mt-1">Manage Google Drive connections and sync</p>
         </motion.div>
 
+        {isLocalMode && connectorStatus?.connected && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="glass-card border-white/8 p-4 rounded-xl mb-6 flex items-center gap-3"
+          >
+            <span className="h-2 w-2 rounded-full bg-status-success shrink-0" />
+            <div className="min-w-0">
+              <div className="font-600 text-white text-sm">Connected</div>
+              <div className="text-sm text-text-tertiary truncate">{connectorStatus.message}</div>
+            </div>
+          </motion.div>
+        )}
+
         {hasAccounts ? (
           <motion.div
             className="space-y-3"
@@ -173,7 +193,7 @@ export function DrivePanel({
             initial="hidden"
             animate="visible"
           >
-            {accounts.map((account, index) => (
+            {accounts.map((account) => (
               <motion.div
                 key={account.id}
                 variants={itemVariants}
@@ -210,17 +230,19 @@ export function DrivePanel({
             variants={itemVariants}
             className="mt-8 space-y-3 border-t border-white/8 pt-8"
           >
-            <motion.button
-              type="button"
-              onClick={handleConnect}
-              disabled={syncing}
-              whileHover={{ scale: 1.02, y: -1 }}
-              whileTap={{ scale: 0.98 }}
-              className="w-full btn-premium h-11 font-600 text-white disabled:opacity-50"
-            >
-              {hasAccounts ? "Add Account" : "Connect Drive"}
-            </motion.button>
-            {hasAccounts && (
+            {!(isLocalMode && connectorStatus?.connected) && (
+              <motion.button
+                type="button"
+                onClick={handleConnect}
+                disabled={syncing}
+                whileHover={{ scale: 1.02, y: -1 }}
+                whileTap={{ scale: 0.98 }}
+                className="w-full btn-premium h-11 font-600 text-white disabled:opacity-50"
+              >
+                {hasAccounts ? "Add Account" : "Connect Drive"}
+              </motion.button>
+            )}
+            {showSyncActions && (
               <motion.div
                 className="grid gap-2 grid-cols-2"
                 initial={{ opacity: 0, y: 8 }}
@@ -358,4 +380,3 @@ export function DrivePanel({
     </motion.section>
   );
 }
-

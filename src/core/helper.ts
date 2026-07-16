@@ -12,20 +12,9 @@ import type {
   RolePermissions,
   PermissionId,
   DeptId,
-  UserType,
-  DocTag,
-  Block,
   TocItem,
-  VideoProvider,
-  VideoTimestamp,
-  ResourceCategory,
-  VisibilityScope,
-  BroadcastAudience,
-  DriveDocumentPermission,
-  DocumentSource,
   QuickActionItem,
 } from "./types";
-import { ROLE_IDS, DEFAULT_ROLE_ID } from "./roles";
 
 // ─── Permission Resolution ───────────────────────────────────────────────────
 
@@ -69,6 +58,15 @@ export function mergePermissions(base: RolePermissions, next: RolePermissions): 
       viewCreatorOps:  !!(base.features?.viewCreatorOps  && next.features?.viewCreatorOps),
       viewBrand:       !!(base.features?.viewBrand       && next.features?.viewBrand),
       viewOperations:  !!(base.features?.viewOperations  && next.features?.viewOperations),
+      approveLeaveTl:                 !!(base.features?.approveLeaveTl                 && next.features?.approveLeaveTl),
+      approveLeaveHr:                 !!(base.features?.approveLeaveHr                 && next.features?.approveLeaveHr),
+      manageHrCalendar:               !!(base.features?.manageHrCalendar               && next.features?.manageHrCalendar),
+      viewHrRecordsAll:               !!(base.features?.viewHrRecordsAll               && next.features?.viewHrRecordsAll),
+      submitProbationReview:          !!(base.features?.submitProbationReview          && next.features?.submitProbationReview),
+      decideProbationReview:          !!(base.features?.decideProbationReview          && next.features?.decideProbationReview),
+      acknowledgeDeboarding:          !!(base.features?.acknowledgeDeboarding          && next.features?.acknowledgeDeboarding),
+      approveDeboardingEmployeeTrack: !!(base.features?.approveDeboardingEmployeeTrack && next.features?.approveDeboardingEmployeeTrack),
+      flagDeboardingAny:              !!(base.features?.flagDeboardingAny              && next.features?.flagDeboardingAny),
     },
   };
 }
@@ -120,6 +118,18 @@ export function getRolePermissionIds(permissions: RolePermissions): PermissionId
   if (permissions.features?.viewCreatorOps)                    ids.push("view_creator_ops");
   if (permissions.features?.viewBrand)                         ids.push("view_brand");
   if (permissions.features?.viewOperations)                    ids.push("view_operations");
+  if (permissions.features?.approveLeaveTl)                    ids.push("approve_leave_tl");
+  if (permissions.features?.approveLeaveHr)                    ids.push("approve_leave_hr");
+  if (permissions.features?.manageHrCalendar)                  ids.push("manage_hr_calendar");
+  if (permissions.features?.viewHrRecordsAll)                  ids.push("view_hr_records_all");
+  if (permissions.features?.submitProbationReview)             ids.push("submit_probation_review");
+  if (permissions.features?.decideProbationReview)             ids.push("decide_probation_review");
+  if (permissions.features?.acknowledgeDeboarding)              ids.push("acknowledge_deboarding");
+  if (permissions.features?.approveDeboardingEmployeeTrack)    ids.push("approve_deboarding_employee_track");
+  if (permissions.features?.flagDeboardingAny)                 ids.push("flag_deboarding_any");
+  if (permissions.features?.viewTeamLeaveHistory)              ids.push("view_team_leave_history");
+  if (permissions.features?.managePeople)                      ids.push("manage_people");
+  if (permissions.features?.manageOnboarding)                  ids.push("manage_onboarding");
 
   // Deduplicate while preserving order
   return [...new Set(ids)];
@@ -149,6 +159,18 @@ export function permissionFromPolicy(permissions: RolePermissions, permission: P
     case "view_creator_ops":      return permissions.features?.viewCreatorOps  ?? false;
     case "view_brand":            return permissions.features?.viewBrand       ?? false;
     case "view_operations":       return permissions.features?.viewOperations  ?? false;
+    case "approve_leave_tl":                 return permissions.features?.approveLeaveTl                 ?? false;
+    case "approve_leave_hr":                 return permissions.features?.approveLeaveHr                 ?? false;
+    case "manage_hr_calendar":               return permissions.features?.manageHrCalendar               ?? false;
+    case "view_hr_records_all":              return permissions.features?.viewHrRecordsAll               ?? false;
+    case "submit_probation_review":          return permissions.features?.submitProbationReview          ?? false;
+    case "decide_probation_review":          return permissions.features?.decideProbationReview          ?? false;
+    case "acknowledge_deboarding":           return permissions.features?.acknowledgeDeboarding          ?? false;
+    case "approve_deboarding_employee_track": return permissions.features?.approveDeboardingEmployeeTrack ?? false;
+    case "flag_deboarding_any":              return permissions.features?.flagDeboardingAny              ?? false;
+    case "view_team_leave_history":          return permissions.features?.viewTeamLeaveHistory           ?? false;
+    case "manage_people":                    return permissions.features?.managePeople                   ?? false;
+    case "manage_onboarding":                return permissions.features?.manageOnboarding               ?? false;
     default:                      return false;
   }
 }
@@ -219,6 +241,28 @@ export function formatDocumentDate(date: Date = new Date()): string {
     day:   "numeric",
     year:  "numeric",
   });
+}
+
+/**
+ * Returns a short relative-time label ("Just now", "2h ago", "Yesterday",
+ * "3d ago"), falling back to formatDocumentDate beyond a week. Accepts either
+ * an ISO timestamp or the "Mon DD, YYYY" strings formatDocumentDate produces.
+ */
+export function formatRelativeTime(timestamp: string, now: Date = new Date()): string {
+  const then = new Date(timestamp);
+  if (Number.isNaN(then.getTime())) return timestamp;
+
+  const diffMs = now.getTime() - then.getTime();
+  const diffMinutes = Math.floor(diffMs / 60_000);
+  const diffHours   = Math.floor(diffMs / 3_600_000);
+  const diffDays    = Math.floor(diffMs / 86_400_000);
+
+  if (diffMinutes < 1) return "Just now";
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return formatDocumentDate(then);
 }
 
 // ─── Quick Actions ───────────────────────────────────────────────────────────
@@ -304,9 +348,9 @@ export function generateActivityId(): string {
   return `act_${Date.now()}`;
 }
 
-/** Generates a user ID. */
+/** Generates a user ID. Real uuid — public.users.id is a uuid primary key. */
 export function generateUserId(): string {
-  return `u-${Date.now()}`;
+  return crypto.randomUUID();
 }
 
 /** Generates a video item ID. */
@@ -322,4 +366,49 @@ export function generateResourceId(): string {
 /** Generates a version snapshot ID. */
 export function generateSnapshotId(documentId: string): string {
   return `snapshot-${documentId}-${Date.now()}`;
+}
+
+// The hr_* tables live on real uuid primary keys (public.hr_onboarding etc,
+// see supabase-migrations/010_hr_domain_on_public_users.sql) — these all
+// generate real uuids, not prefixed strings, so a client-created record's id
+// is already valid to write directly into a uuid PK column.
+
+/** Generates an onboarding record ID. */
+export function generateOnboardingId(): string {
+  return crypto.randomUUID();
+}
+
+/** Generates a leave request ID. */
+export function generateLeaveRequestId(): string {
+  return crypto.randomUUID();
+}
+
+/** Generates an attendance record ID. */
+export function generateAttendanceId(): string {
+  return crypto.randomUUID();
+}
+
+/** Generates a holiday calendar entry ID. */
+export function generateHolidayId(): string {
+  return crypto.randomUUID();
+}
+
+/** Generates a probation record ID. */
+export function generateProbationId(): string {
+  return crypto.randomUUID();
+}
+
+/** Generates a deboarding record ID. */
+export function generateDeboardingId(): string {
+  return crypto.randomUUID();
+}
+
+/** Generates a notification ID. */
+export function generateNotificationId(): string {
+  return crypto.randomUUID();
+}
+
+/** Generates a manager-history entry ID. */
+export function generateManagerHistoryId(): string {
+  return crypto.randomUUID();
 }

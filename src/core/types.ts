@@ -10,7 +10,9 @@
 export type UserType   = "employee" | "creator";
 export type UserStatus = "active" | "invited" | "disabled";
 export type RoleId     = string;
-export type DeptId     = "im" | "tm" | "hr" | "finance" | "onboarding" | "creator" | "brand" | "operations";
+// public.users.business_line is free text on the live schema (not a fixed
+// catalog), so this stays a plain string rather than a closed union.
+export type DeptId     = string;
 
 // ─── Permissions ─────────────────────────────────────────────────────────────
 
@@ -32,7 +34,19 @@ export type PermissionId =
   | "view_onboarding"
   | "view_creator_ops"
   | "view_brand"
-  | "view_operations";
+  | "view_operations"
+  | "approve_leave_tl"
+  | "approve_leave_hr"
+  | "manage_hr_calendar"
+  | "view_hr_records_all"
+  | "submit_probation_review"
+  | "decide_probation_review"
+  | "acknowledge_deboarding"
+  | "approve_deboarding_employee_track"
+  | "flag_deboarding_any"
+  | "view_team_leave_history"
+  | "manage_people"
+  | "manage_onboarding";
 
 export interface RolePermissions {
   documents: {
@@ -62,6 +76,18 @@ export interface RolePermissions {
     viewCreatorOps: boolean;
     viewBrand:      boolean;
     viewOperations: boolean;
+    approveLeaveTl:                 boolean;
+    approveLeaveHr:                 boolean;
+    manageHrCalendar:               boolean;
+    viewHrRecordsAll:               boolean;
+    submitProbationReview:          boolean;
+    decideProbationReview:          boolean;
+    acknowledgeDeboarding:          boolean;
+    approveDeboardingEmployeeTrack: boolean;
+    flagDeboardingAny:              boolean;
+    viewTeamLeaveHistory:           boolean;
+    managePeople:                   boolean;
+    manageOnboarding:               boolean;
   }>;
 }
 
@@ -103,6 +129,10 @@ export interface User {
   permissionIds:  PermissionId[];
   createdById:    string;
   status:         UserStatus;
+  // ISO date the employee joined. Required going forward for every user
+  // created via createUser(); optional here because rows predating this
+  // field have no reliable value — never fabricate one for those.
+  dateJoined?:    string;
 }
 
 // ─── Document ─────────────────────────────────────────────────────────────────
@@ -184,6 +214,7 @@ export interface DocMeta {
   allowedTeamIds?:       string[];
   ingestionStatus?:  IngestionStatus;
   ingestionJobId?:   string;
+  documentVersionId?: string;
   broadcastAudience?:     BroadcastAudience;
   broadcastRoleIds?:      RoleId[];
   broadcastDepartmentIds?: DeptId[];
@@ -262,12 +293,30 @@ export type BlockType =
   | "timeline"
   | "divider"
   | "resource"
-  | "video";
+  | "video"
+  | "code"
+  | "image"
+  | "list_item";
 
 export interface BaseBlock {
   type: BlockType;
   id?:  string;
   content?: string;
+}
+
+export interface CodeBlock extends BaseBlock {
+  type:    "code";
+  content: string;
+}
+
+export interface ImageBlock extends Omit<BaseBlock, "content"> {
+  type:    "image";
+  content: { src: string; alt?: string };
+}
+
+export interface ListItemBlock extends BaseBlock {
+  type:    "list_item";
+  content: string;
 }
 
 export interface HeadingBlock extends BaseBlock {
@@ -380,6 +429,9 @@ export type Block =
   | TimelineBlock
   | ResourceBlock
   | VideoBlock
+  | CodeBlock
+  | ImageBlock
+  | ListItemBlock
   | BaseBlock;
 
 // ─── Document (full) ─────────────────────────────────────────────────────────
@@ -387,7 +439,7 @@ export type Block =
 export interface TocItem {
   id:    string;
   label: string;
-  level: 1 | 2;
+  level: 1 | 2 | 3;
 }
 
 export interface Document extends DocMeta {
@@ -480,19 +532,238 @@ export type ActivityAction =
   | "USER_MANAGED"
   | "ROLE_ASSIGNED"
   | "INGESTION_FAILED"
-  | "SYSTEM_EVENT";
+  | "SYSTEM_EVENT"
+  | "LEAVE_SUBMITTED"
+  | "LEAVE_TL_APPROVED"
+  | "LEAVE_HR_APPROVED"
+  | "LEAVE_REJECTED"
+  | "LEAVE_CANCELLED"
+  | "ONBOARDING_SUBMITTED"
+  | "ONBOARDING_ACKNOWLEDGED"
+  | "ONBOARDING_REJECTED"
+  | "ONBOARDING_COMPLETED"
+  | "PROBATION_SUBMITTED"
+  | "PROBATION_UNDER_REVIEW"
+  | "PROBATION_DECIDED"
+  | "PROBATION_NOTE_ADDED"
+  | "DEBOARDING_FLAGGED"
+  | "DEBOARDING_ACKNOWLEDGED"
+  | "DEBOARDING_APPROVED"
+  | "DEBOARDING_FOUNDER_APPROVED"
+  | "DEBOARDING_COMPLETED"
+  | "ATTENDANCE_UPDATED"
+  | "DATE_JOINED_CHANGED";
 
 export interface ActivityEvent {
   id:          string;
   userId:      string;
   action:      ActivityAction;
   targetId?:   string;
-  targetType:  "document" | "resource" | "user" | "system";
+  targetType:  "document" | "resource" | "user" | "system" | "hr_record";
   timestamp:   string;
   metadata?:   Record<string, string>;
 }
 
+// ─── HR ──────────────────────────────────────────────────────────────────────
+
+export type OnboardingStatus = "pending" | "submitted" | "acknowledged" | "completed";
+
+export interface OnboardingRecord {
+  id:               string;
+  userId:           string;
+  status:           OnboardingStatus;
+  onboardingData:   Record<string, string>;
+  complianceData:   Record<string, string>;
+  form11SentAt?:    string;
+  submittedAt?:     string;
+  acknowledgedById?: string;
+  acknowledgedAt?:  string;
+  completedById?:    string;
+  completedAt?:      string;
+  rejectedById?:    string;
+  rejectedAt?:      string;
+  rejectionReason?: string;
+  createdAt:        string;
+}
+
+export type LeaveRequestType = "leave" | "wfh";
+
+export type LeaveStatus =
+  | "pending"
+  | "cancelled"
+  | "tl_approved"
+  | "cofounder_pending"
+  | "hr_approved"
+  | "rejected";
+
+export interface LeaveRequest {
+  id:               string;
+  userId:           string;
+  requestType:      LeaveRequestType;
+  dateFrom:         string;
+  dateTo:           string;
+  reason:           string;
+  additionalInfo?:  string;
+  status:           LeaveStatus;
+  rejectionReason?: string;
+  cancelledAt?:     string;
+  tlApprovedById?:  string;
+  tlApprovedAt?:    string;
+  hrApprovedById?:  string;
+  hrApprovedAt?:    string;
+  founderNotified:  boolean;
+  createdAt:        string;
+  updatedAt:        string;
+}
+
+// Leave balance tracks total / used / remaining per user per year per type.
+export interface LeaveBalance {
+  id:             string;
+  userId:         string;
+  year:           number;
+  leaveType:      string;
+  totalAllocated: number;
+  used:           number;
+  updatedAt:      string;
+}
+
+export const LEAVE_TYPE_LABELS: Record<string, string> = {
+  leave: "Leave",
+  wfh:   "WFH",
+  // backward-compat display for records created before the simplification
+  annual_leave:    "Leave",
+  sick_leave:      "Leave",
+  casual_leave:    "Leave",
+  emergency_leave: "Leave",
+  comp_off:        "Leave",
+  maternity_leave: "Leave",
+  paternity_leave: "Leave",
+};
+
+export const LEAVE_TYPES_WITH_BALANCE: ReadonlySet<string> = new Set(["leave"]);
+
+// Day-level attendance register: one record per employee per month, with a
+// status per calendar day. Totals are derived (see computeAttendanceTotals
+// in core/operon.ts) rather than stored, so they can never drift from the
+// underlying day marks.
+export type AttendanceDayStatus = "present" | "leave" | "wfh" | "absent" | "half_day";
+
+export interface AttendanceRecord {
+  id:        string;
+  userId:    string;
+  month:     string; // "YYYY-MM"
+  days:      Record<string, AttendanceDayStatus>; // key = day-of-month, e.g. "1".."31"
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AttendanceAuditEntry {
+  id:                 string;
+  attendanceRecordId: string;
+  userId:             string; // whose attendance changed
+  changedById:        string; // who made the change
+  date:               string; // ISO date "YYYY-MM-DD"
+  previousStatus:     AttendanceDayStatus | null;
+  newStatus:          AttendanceDayStatus | null;
+  reason?:            string; // required when changedById !== userId
+  createdAt:          string;
+}
+
+export type HolidayType = "public" | "optional" | "company";
+
+export interface Holiday {
+  id:           string;
+  date:         string;
+  name:         string;
+  type:         HolidayType;
+  createdById:  string;
+  createdAt:    string;
+  updatedAt:    string;
+}
+
+export type ProbationStatus =
+  | "pending"
+  | "under_review"
+  | "confirmed"
+  | "extended"
+  | "terminated";
+
+export const PROBATION_ACTIVE_STATUSES: ReadonlySet<ProbationStatus> = new Set<ProbationStatus>([
+  "pending",
+  "under_review",
+  "extended",
+]);
+
+export const PROBATION_TERMINAL_STATUSES: ReadonlySet<ProbationStatus> = new Set<ProbationStatus>([
+  "confirmed",
+  "terminated",
+]);
+
+export interface ProbationRecord {
+  id:                      string;
+  userId:                  string;
+  dateJoined:              string;
+  probationDurationDays:   number;       // normalized/stored value, default 90
+  probationDurationUnit:   "days" | "months"; // unit the duration was entered in
+  expectedReviewDate:      string;       // ISO date = dateJoined + probationDurationDays
+  status:                  ProbationStatus;
+  reviewedById?:           string;
+  reviewedAt?:             string;
+  parentRecordId?:         string;       // set on extension children
+  submittedById:           string;
+  createdAt:               string;
+}
+
+// Append-only note log — replaces single mutable notes field.
+export interface ProbationNote {
+  id:               string;
+  probationRecordId: string;
+  authorId:         string;
+  note:             string;
+  noteType:         "assessment" | "decision" | "general";
+  createdAt:        string;
+}
+
+export type DeboardingTrack  = "creator" | "employee";
+export type DeboardingStatus =
+  | "pending_lead_approval"     // creator track: CA submitted, awaiting TL/Senior TM
+  | "pending_founder_approval"  // employee track: HR submitted, awaiting Co-Founder sign-off
+  | "data_recovery_pending"     // both tracks: access/data checklist in progress
+  | "offboarded";               // complete — user.status set to "disabled"
+
+export interface DeboardingRecord {
+  id:                 string;
+  userId:             string;
+  initiatedById:      string;
+  track:              DeboardingTrack;
+  status:             DeboardingStatus;
+  reason?:            string;
+  initiatedAt:        string;
+  approvedById?:      string;   // TL who approved the creator deboarding
+  approvedAt?:        string;
+  founderApprovedById?: string; // Co-Founder who approved the employee deboarding
+  founderApprovedAt?: string;
+  checklist:          Record<string, boolean>;
+  completedById?:     string;
+  completedAt?:       string;
+  createdAt:          string;
+}
+
+// One row per reporting-manager change, so past attendance/leave history can
+// resolve "who was the manager on date X" instead of overwriting it. The
+// current manager is whichever entry has the latest effectiveFrom for that user.
+export interface ManagerHistoryEntry {
+  id:            string;
+  userId:        string;
+  supervisorId?: string;
+  changedById:   string;
+  effectiveFrom: string; // ISO date
+  createdAt:     string;
+}
+
 // ─── Notifications ───────────────────────────────────────────────────────────
+
+export type NotificationEntityType = "leave" | "onboarding" | "probation" | "deboarding" | "document" | "user";
 
 export interface Notification {
   id:               string;
@@ -503,6 +774,9 @@ export interface Notification {
   departmentIds?:   DeptId[];
   roleIds?:         RoleId[];
   userIds?:         string[];
+  actorId?:         string;
+  entityType?:      NotificationEntityType;
+  entityId?:        string;
   metadata?:        Record<string, string>;
   createdAt:        string;
   expiresAt?:       string;

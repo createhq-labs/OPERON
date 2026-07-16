@@ -1,73 +1,82 @@
+"use client";
+
 import { useState } from "react";
 import Image from "next/image";
 import type { VideoBlock, VideoProvider } from "@/renderers/types";
 
 const PROVIDER_LABELS: Record<VideoProvider, string> = {
-  loom: "Loom",
-  youtube: "YouTube",
-  vimeo: "Vimeo",
-  google_drive: "Google Drive",
+  loom:         "Loom",
+  youtube:      "YouTube",
+  vimeo:        "Vimeo",
+  google_drive: "Drive",
 };
 
-interface VideoBlockCardProps {
-  block: VideoBlock["content"];
-}
-
-function VideoBlockCard({ block }: VideoBlockCardProps) {
-  const [isTranscriptOpen, setIsTranscriptOpen] = useState(false);
-  const providerLabel = PROVIDER_LABELS[block.provider] ?? "Video";
+function VideoCard({ block }: { block: VideoBlock["content"] }) {
+  const [transcriptOpen, setTranscriptOpen] = useState(false);
+  const label = PROVIDER_LABELS[block.provider] ?? "Video";
 
   return (
     <div
       style={{
         borderRadius: "var(--r-lg)",
-        border: "1px solid var(--border)",
-        background: "var(--surface)",
-        padding: "20px",
+        border:       "1px solid var(--op-border)",
+        background:   "var(--op-surface)",
+        overflow:     "hidden",
       }}
     >
+      {/* Header */}
       <div
         style={{
-          display: "grid",
-          gridTemplateColumns: block.thumbnail ? "1fr auto" : "1fr",
-          gap: "16px",
-          marginBottom: "16px",
-          alignItems: "start",
+          padding:      "16px 20px",
+          borderBottom: "1px solid var(--op-border)",
+          display:      "flex",
+          alignItems:   "flex-start",
+          gap:          "16px",
         }}
       >
-        <div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {/* Provider badge */}
           <div
             style={{
-              fontFamily: "var(--font-ui)",
-              fontSize: "11px",
-              fontWeight: 600,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              color: "var(--text-3)",
-              marginBottom: "6px",
+              display:       "inline-flex",
+              alignItems:    "center",
+              borderRadius:  "var(--r-full)",
+              border:        "1px solid var(--op-border)",
+              background:    "var(--op-surface-2)",
+              padding:       "2px 10px",
+              fontFamily:    "var(--font-ui)",
+              fontSize:      "var(--text-11)",
+              fontWeight:    600,
+              letterSpacing: "0.04em",
+              color:         "var(--op-text-3)",
+              marginBottom:  "8px",
             }}
           >
-            {providerLabel}
+            {label}
           </div>
+
           <h3
             style={{
               fontFamily: "var(--font-display)",
-              fontSize: "var(--text-16)",
-              fontWeight: 600,
-              color: "var(--text)",
-              margin: 0,
+              fontSize:   "var(--text-16)",
+              fontWeight: 500,
+              color:      "var(--op-text)",
+              margin:     0,
+              lineHeight: 1.3,
             }}
           >
             {block.title}
           </h3>
+
           {block.description && (
             <p
               style={{
-                marginTop: "6px",
+                marginTop:  "6px",
                 fontFamily: "var(--font-body)",
-                fontSize: "13px",
-                lineHeight: "1.6",
-                color: "var(--text-2)",
+                fontSize:   "var(--text-13)",
+                lineHeight: 1.6,
+                color:      "var(--op-text-2)",
+                margin:     "6px 0 0",
               }}
             >
               {block.description}
@@ -78,32 +87,32 @@ function VideoBlockCard({ block }: VideoBlockCardProps) {
         {block.thumbnail && (
           <div
             style={{
-              position: "relative",
-              width: "80px",
-              height: "80px",
+              flexShrink:   0,
+              width:        "64px",
+              height:       "64px",
               borderRadius: "var(--r-md)",
-              overflow: "hidden",
-              flexShrink: 0,
+              overflow:     "hidden",
+              border:       "1px solid var(--op-border)",
             }}
           >
             <Image
               src={block.thumbnail}
-              alt={block.title}
-              width={80}
-              height={80}
-              style={{ objectFit: "cover" }}
+              alt=""
+              width={64}
+              height={64}
+              style={{ objectFit: "cover", width: "100%", height: "100%" }}
               unoptimized
             />
           </div>
         )}
       </div>
 
+      {/* Embed */}
       <div
         style={{
-          borderRadius: "var(--r-md)",
-          overflow: "hidden",
-          background: "var(--surface-2)",
+          background: "var(--op-bg)",
           aspectRatio: "16 / 9",
+          position:   "relative",
         }}
       >
         <iframe
@@ -112,84 +121,81 @@ function VideoBlockCard({ block }: VideoBlockCardProps) {
           allow="autoplay; fullscreen; picture-in-picture"
           allowFullScreen
           sandbox="allow-scripts allow-same-origin allow-presentation allow-popups"
-          style={{ width: "100%", height: "100%", border: "none", display: "block" }}
+          style={{
+            position: "absolute",
+            inset:    0,
+            width:    "100%",
+            height:   "100%",
+            border:   "none",
+            display:  "block",
+          }}
         />
       </div>
 
-      {(block.transcript !== undefined) && (
-        <div
-          style={{
-            marginTop: "12px",
-            borderRadius: "var(--r-md)",
-            border: "1px solid var(--border)",
-            background: "var(--surface-2)",
-            padding: "14px 16px",
-          }}
-        >
-          <div
+      {/* Transcript */}
+      {block.transcript !== undefined && (
+        <div style={{ borderTop: "1px solid var(--op-border)" }}>
+          <button
+            type="button"
+            onClick={() => setTranscriptOpen((v) => !v)}
             style={{
-              display: "flex",
-              alignItems: "center",
+              width:          "100%",
+              display:        "flex",
+              alignItems:     "center",
               justifyContent: "space-between",
-              gap: "12px",
+              padding:        "12px 20px",
+              background:     "transparent",
+              border:         "none",
+              cursor:         "pointer",
             }}
           >
-            <div
+            <span
               style={{
                 fontFamily: "var(--font-ui)",
-                fontSize: "13px",
+                fontSize:   "var(--text-13)",
                 fontWeight: 600,
-                color: "var(--text)",
+                color:      "var(--op-text-2)",
               }}
             >
               Transcript
-            </div>
-            <button
-              type="button"
-              onClick={() => setIsTranscriptOpen((v) => !v)}
+            </span>
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 16 16"
+              fill="none"
+              aria-hidden="true"
               style={{
-                flexShrink: 0,
-                borderRadius: "var(--r-full)",
-                border: "1px solid var(--border)",
-                background: "transparent",
-                padding: "4px 12px",
-                fontFamily: "var(--font-ui)",
-                fontSize: "12px",
-                fontWeight: 500,
-                color: "var(--text-2)",
-                cursor: "pointer",
-                transition: "border-color 150ms ease, color 150ms ease",
-              }}
-              onMouseEnter={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--border-hover)";
-                (e.currentTarget as HTMLButtonElement).style.color = "var(--text)";
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--border)";
-                (e.currentTarget as HTMLButtonElement).style.color = "var(--text-2)";
+                color:      "var(--op-text-3)",
+                transition: "transform 200ms",
+                transform:  transcriptOpen ? "rotate(180deg)" : "rotate(0deg)",
               }}
             >
-              {isTranscriptOpen ? "Hide" : "Show"}
-            </button>
-          </div>
+              <path
+                d="M4 6l4 4 4-4"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
 
-          {isTranscriptOpen && (
+          {transcriptOpen && (
             <div
               style={{
-                marginTop: "12px",
-                maxHeight: "200px",
-                overflowY: "auto",
-                borderRadius: "var(--r-sm)",
-                background: "var(--surface-3)",
-                padding: "12px 14px",
+                padding:    "0 20px 16px",
                 fontFamily: "var(--font-body)",
-                fontSize: "13px",
-                lineHeight: "1.7",
-                color: "var(--text-2)",
+                fontSize:   "var(--text-13)",
+                lineHeight: 1.8,
+                color:      "var(--op-text-2)",
                 whiteSpace: "pre-wrap",
+                maxHeight:  "220px",
+                overflowY:  "auto",
               }}
+              className="scrollbar-thin"
             >
-              {block.transcript ?? "Transcript unavailable."}
+              {block.transcript || "Transcript unavailable."}
             </div>
           )}
         </div>
@@ -199,5 +205,10 @@ function VideoBlockCard({ block }: VideoBlockCardProps) {
 }
 
 export function renderVideo(block: VideoBlock, index: number) {
-  return <VideoBlockCard key={block.id ?? `video-${index}`} block={block.content} />;
+  return (
+    <VideoCard
+      key={block.id ?? `video-${index}`}
+      block={block.content}
+    />
+  );
 }

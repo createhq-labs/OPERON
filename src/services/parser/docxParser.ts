@@ -1,14 +1,27 @@
 import type { ParserResult } from "@/services/parser/types";
-import { parsePlainTextDocument } from "@/services/parser/plainTextParser";
+import { parseHtmlDocument } from "@/services/parser/htmlParser";
 
+/**
+ * mammoth.convertToHtml (not extractRawText) preserves headings, lists,
+ * tables, and embeds images as base64 data URIs by default — real structure,
+ * not a flat string. Reusing htmlParser.ts's already-working heading/table/
+ * image detection instead of re-solving the same problem for DOCX.
+ */
 export async function parseDocxDocument(file: File): Promise<ParserResult> {
   try {
     const { default: mammoth } = await import("mammoth");
     const arrayBuffer = await file.arrayBuffer();
-    const result = await mammoth.extractRawText({ arrayBuffer });
-    const text = result.value.replace(/\r\n/g, "\n").trim();
-    return parsePlainTextDocument(text, file.name);
-  } catch (error) {
+    const { value: html, messages } = await mammoth.convertToHtml({ arrayBuffer });
+
+    const result = parseHtmlDocument(html, file.name);
+    const mammothWarnings = messages
+      .filter((message) => message.type === "warning")
+      .map((message) => message.message);
+
+    return mammothWarnings.length > 0
+      ? { ...result, warnings: [...(result.warnings ?? []), ...mammothWarnings] }
+      : result;
+  } catch {
     return {
       title: file.name.replace(/\.[^/.]+$/, ""),
       description: "Unable to extract content from this document.",

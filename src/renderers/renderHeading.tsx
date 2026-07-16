@@ -1,36 +1,69 @@
+"use client";
+
 import type { HeadingBlock } from "@/renderers/types";
 
-export function renderHeading(block: HeadingBlock, _index: number) {
-  const isH2 = block.type === "heading";
+export function renderHeading(block: HeadingBlock, index: number) {
+  const isH1 = block.type === "heading";
 
-  return (
-    <div style={{ marginTop: "32px", scrollMarginTop: "80px" }}>
-      {isH2 ? (
+  if (isH1) {
+    return (
+      <div
+        style={{
+          marginTop: index === 0 ? 0 : "48px",
+          marginBottom: "4px",
+          scrollMarginTop: "80px",
+        }}
+        id={block.anchorId ?? block.id}
+      >
         <h2
           style={{
             fontFamily: "var(--font-display)",
-            fontSize: "var(--text-20)",
-            fontWeight: 600,
-            color: "var(--text)",
+            fontSize: "clamp(1.5rem, 3vw, var(--text-30))",
+            fontWeight: 300,
+            letterSpacing: "-0.03em",
+            lineHeight: 1.15,
+            color: "var(--op-text)",
             margin: 0,
-            letterSpacing: "-0.01em",
           }}
         >
           {block.content}
         </h2>
-      ) : (
-        <h3
+        {/* Ember underline — single accent stroke, never colored text */}
+        <div
+          aria-hidden="true"
           style={{
-            fontFamily: "var(--font-display)",
-            fontSize: "var(--text-16)",
-            fontWeight: 600,
-            color: "var(--text)",
-            margin: 0,
+            marginTop: "10px",
+            height: "1px",
+            width: "40px",
+            background: "var(--op-accent)",
+            opacity: 0.7,
           }}
-        >
-          {block.content}
-        </h3>
-      )}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        marginTop: "32px",
+        scrollMarginTop: "80px",
+      }}
+      id={block.anchorId ?? block.id}
+    >
+      <h3
+        style={{
+          fontFamily: "var(--font-ui)",
+          fontSize: "var(--text-14)",
+          fontWeight: 600,
+          letterSpacing: "0.04em",
+          textTransform: "uppercase",
+          color: "var(--op-text-2)",
+          margin: 0,
+        }}
+      >
+        {block.content}
+      </h3>
     </div>
   );
 }

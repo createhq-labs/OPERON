@@ -1,3 +1,5 @@
+"use client";
+
 import type { ChecklistBlock } from "@/renderers/types";
 
 export function renderChecklist(block: ChecklistBlock, _index: number) {
@@ -7,59 +9,99 @@ export function renderChecklist(block: ChecklistBlock, _index: number) {
     <div
       style={{
         borderRadius: "var(--r-lg)",
-        border: "1px solid var(--border)",
-        background: "var(--surface)",
-        padding: "20px",
+        border:       "1px solid var(--op-border)",
+        background:   "var(--op-surface)",
+        overflow:     "hidden",
       }}
     >
       {title && (
         <div
           style={{
-            fontSize: "var(--text-13)",
-            fontWeight: 600,
-            color: "var(--text)",
-            marginBottom: "12px",
+            padding:      "14px 20px",
+            borderBottom: "1px solid var(--op-border)",
+            fontFamily:   "var(--font-ui)",
+            fontSize:     "var(--text-11)",
+            fontWeight:   700,
+            letterSpacing: "0.08em",
+            textTransform: "uppercase",
+            color:        "var(--op-text-3)",
           }}
         >
           {title}
         </div>
       )}
-      <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-        {items.map((item) => (
+
+      <div style={{ padding: "8px" }}>
+        {items.map((item, i) => (
           <div
             key={item.id}
             style={{
-              display: "flex",
-              alignItems: "flex-start",
-              gap: "12px",
+              display:      "flex",
+              alignItems:   "center",
+              gap:          "12px",
+              padding:      "10px 12px",
               borderRadius: "var(--r-md)",
-              border: "1px solid var(--border)",
-              background: "var(--surface-2)",
-              padding: "10px 14px",
+              transition:   "background 120ms",
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLDivElement).style.background = "var(--op-surface-2)";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLDivElement).style.background = "transparent";
             }}
           >
-            <span
+            {/* Checkbox square */}
+            <div
               aria-hidden="true"
               style={{
-                marginTop: "3px",
-                flexShrink: 0,
-                width: "8px",
-                height: "8px",
-                borderRadius: "50%",
-                background: "var(--accent)",
+                flexShrink:   0,
+                width:        "16px",
+                height:       "16px",
+                borderRadius: "var(--r-sm)",
+                border:       "1.5px solid var(--op-border-hover)",
+                display:      "flex",
+                alignItems:   "center",
+                justifyContent: "center",
               }}
-            />
-            <p
+            >
+              {/* Dot inside — unfilled state */}
+              <div
+                style={{
+                  width:        "6px",
+                  height:       "6px",
+                  borderRadius: "50%",
+                  background:   "var(--op-border-hover)",
+                  opacity:      0.4,
+                }}
+              />
+            </div>
+
+            <span
               style={{
                 fontFamily: "var(--font-body)",
-                fontSize: "14px",
-                lineHeight: "1.5",
-                color: "var(--text-2)",
-                margin: 0,
+                fontSize:   "var(--text-14)",
+                lineHeight: 1.5,
+                color:      "var(--op-text-2)",
               }}
             >
               {item.label}
-            </p>
+            </span>
+
+            {item.required && (
+              <span
+                style={{
+                  marginLeft:    "auto",
+                  fontFamily:    "var(--font-ui)",
+                  fontSize:      "var(--text-11)",
+                  fontWeight:    600,
+                  letterSpacing: "0.04em",
+                  color:         "var(--op-accent)",
+                  opacity:       0.8,
+                }}
+              >
+                Required
+              </span>
+            )}
           </div>
         ))}
       </div>

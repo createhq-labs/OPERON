@@ -1,17 +1,24 @@
 import type { IngestionJob } from "../types";
-import type { ParserResult } from "@/services/parser/types";
+import type { ParserResult, DriveDocumentPayload } from "@/services/parser/types";
 import { parseUploadedDocument, parseDriveDocument } from "@/services/parser/parserFactory";
 
 export interface ExtractionResult {
   parsed: ParserResult;
 }
 
-export async function extractContent(job: IngestionJob, file: File | undefined): Promise<ExtractionResult> {
+export async function extractContent(
+  job: IngestionJob,
+  file: File | undefined
+): Promise<ExtractionResult> {
   if (job.sourceType === "googleDrive") {
     if (!job.rawPayload) {
-      throw new Error("Google Drive ingestion requires a raw payload for extraction.");
+      throw new Error(
+        "Google Drive ingestion requires a raw payload for extraction."
+      );
     }
-    const parsed = parseDriveDocument(job.rawPayload as any);
+    const parsed = parseDriveDocument(
+      job.rawPayload as DriveDocumentPayload
+    );
     return { parsed };
   }
 

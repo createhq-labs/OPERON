@@ -7,6 +7,16 @@ import {
   canManageRoles,
   canUploadDocument,
   canPublishGlobally,
+  canApproveLeaveAsTl,
+  canApproveLeaveAsHr,
+  canManageHrCalendar,
+  canSubmitProbationReview,
+  canDecideProbationReview,
+  canAcknowledgeDeboarding,
+  canApproveDeboardingEmployeeTrack,
+  canFlagDeboardingAny,
+  canManagePeople,
+  canManageOnboarding,
 } from "@/security/permissions";
 
 // ─── Require Guards ───────────────────────────────────────────────────────────
@@ -112,6 +122,156 @@ export function requireRoleManagementPermission(
         ? "Your role does not have permission to manage the role registry."
         : "Authentication required."
     );
+  }
+}
+
+/**
+ * Guards HR actions scoped to "your own direct reports" (e.g. TL leave
+ * approval, deboarding flags). Walks one level of the supervisorId chain —
+ * org structure has multiple team leads per department, so this cannot be
+ * resolved by role or department alone.
+ */
+export function requireSupervisorOf(actor: User, subject: User): void {
+  if (subject.supervisorId !== actor.id) {
+    throw new Error("You are not this person's direct manager.");
+  }
+}
+
+export function requireLeaveTlApprovalPermission(
+  user: User | null | undefined,
+  subject: User
+): asserts user is User {
+  if (!canApproveLeaveAsTl(user)) {
+    throw new Error(
+      user
+        ? "Your role does not have permission to approve leave at the team-lead step."
+        : "Authentication required."
+    );
+  }
+  requireSupervisorOf(user, subject);
+}
+
+export function requireLeaveHrApprovalPermission(
+  user: User | null | undefined
+): asserts user is User {
+  if (!canApproveLeaveAsHr(user)) {
+    throw new Error(
+      user
+        ? "Your role does not have permission to approve leave at the HR step."
+        : "Authentication required."
+    );
+  }
+}
+
+export function requireHrCalendarManagementPermission(
+  user: User | null | undefined
+): asserts user is User {
+  if (!canManageHrCalendar(user)) {
+    throw new Error(
+      user
+        ? "Your role does not have permission to manage the holiday calendar."
+        : "Authentication required."
+    );
+  }
+}
+
+export function requireProbationSubmissionPermission(
+  user: User | null | undefined
+): asserts user is User {
+  if (!canSubmitProbationReview(user)) {
+    throw new Error(
+      user
+        ? "Your role does not have permission to submit probation reviews."
+        : "Authentication required."
+    );
+  }
+}
+
+export function requireProbationDecisionPermission(
+  user: User | null | undefined
+): asserts user is User {
+  if (!canDecideProbationReview(user)) {
+    throw new Error(
+      user
+        ? "Your role does not have permission to decide probation outcomes."
+        : "Authentication required."
+    );
+  }
+}
+
+export function requireDeboardingAcknowledgementPermission(
+  user: User | null | undefined
+): asserts user is User {
+  if (!canAcknowledgeDeboarding(user)) {
+    throw new Error(
+      user
+        ? "Your role does not have permission to acknowledge or complete deboarding."
+        : "Authentication required."
+    );
+  }
+}
+
+export function requireDeboardingEmployeeApprovalPermission(
+  user: User | null | undefined
+): asserts user is User {
+  if (!canApproveDeboardingEmployeeTrack(user)) {
+    throw new Error(
+      user
+        ? "Your role does not have permission to approve employee-track deboarding."
+        : "Authentication required."
+    );
+  }
+}
+
+/**
+ * Guards "flag deboarding" — either the actor is the subject's direct
+ * supervisor, or they hold HR/founder-tier authority to flag anyone.
+ */
+export function requireDeboardingFlagPermission(user: User | null | undefined, subject: User): asserts user is User {
+  if (!user) {
+    throw new Error("Authentication required.");
+  }
+  if (subject.supervisorId === user.id) return;
+  if (canFlagDeboardingAny(user)) return;
+  throw new Error("You do not have permission to flag this person for deboarding.");
+}
+
+export function requireManagePeoplePermission(
+  user: User | null | undefined
+): asserts user is User {
+  if (!canManagePeople(user)) {
+    throw new Error(
+      user
+        ? "Your role does not have permission to manage roster members."
+        : "Authentication required."
+    );
+  }
+}
+
+export function requireOnboardingManagementPermission(
+  user: User | null | undefined
+): asserts user is User {
+  if (!canManageOnboarding(user)) {
+    throw new Error(
+      user
+        ? "Your role does not have permission to manage onboarding submissions."
+        : "Authentication required."
+    );
+  }
+}
+
+/**
+ * Guards self-service HR records (own leave history, own onboarding, etc.):
+ * the acting user must either own the record or hold an override permission
+ * the caller has already evaluated (e.g. canViewAllHrRecords(actor)).
+ */
+export function requireOwnRecordOrPermission(
+  actor: User,
+  ownerUserId: string,
+  hasOverridePermission: boolean,
+): void {
+  if (actor.id !== ownerUserId && !hasOverridePermission) {
+    throw new Error("You do not have permission to access this record.");
   }
 }
 

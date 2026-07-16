@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import type { Document, DriveDocumentReference, User } from "@/core/operon";
+import type { Document, DriveDocumentReference, QuickActionItem, User } from "@/core/operon";
 import type { DriveDiagnostics } from "@/services/drive";
 
 const TAG_LABELS: Record<string, string> = {
@@ -16,17 +16,17 @@ interface HomePanelProps {
   user: User;
   providerLoading: boolean;
   driveDiagnostics?: DriveDiagnostics | null;
-  displayQuickActions: Array<{ id: string; label: string; description: string; category?: string }>;
+  displayQuickActions: Array<Pick<QuickActionItem, "id" | "label" | "description" | "category">>;
   accessibleDocs: Array<Document | DriveDocumentReference>;
   pinnedDocs: Document[];
-  onActionSelect: (section: string) => void;
+  onActionSelect: (action: Pick<QuickActionItem, "id" | "label" | "description" | "category">) => void;
   onShowDoc: (docId: string) => void;
 }
 
 export function HomePanel({
-  user,
+  user: _user,
   providerLoading,
-  driveDiagnostics,
+  driveDiagnostics: _driveDiagnostics,
   displayQuickActions,
   accessibleDocs,
   pinnedDocs,
@@ -83,7 +83,7 @@ export function HomePanel({
               <motion.button
                 key={`${action.label}-${action.id}`}
                 type="button"
-                onClick={() => onActionSelect(action.id)}
+                onClick={() => onActionSelect(action)}
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{
