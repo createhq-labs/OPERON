@@ -249,7 +249,10 @@ export async function fetchDriveFileMetadata(accessToken: string, fileId: string
 }
 
 export async function fetchGoogleDocsDocument(accessToken: string, documentId: string) {
-  const response = await fetch(`https://docs.googleapis.com/v1/documents/${encodeURIComponent(documentId)}`, {
+  // includeTabsContent=true is required to get more than the first tab back —
+  // without it the Docs API silently returns only Document.tabs[0] worth of
+  // content for documents that use Google Docs' tabs feature.
+  const response = await fetch(`https://docs.googleapis.com/v1/documents/${encodeURIComponent(documentId)}?includeTabsContent=true`, {
     headers: {
       Authorization: `Bearer ${accessToken}`,
     },

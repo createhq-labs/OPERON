@@ -141,23 +141,40 @@ export interface ParserResult {
   metadata?: ParsedMetadata;
 }
 
+export interface DriveDocumentContent {
+  content: Array<{
+    type?: "paragraph" | "table" | "list" | "image";
+    paragraph?: {
+      elements?: Array<{ textRun?: { content?: string } }>;
+      paragraphStyle?: { namedStyleType?: string };
+      bullet?: { listId?: string; glyphType?: string };
+    };
+    table?: {
+      tableRows: Array<{
+        tableCells: Array<{ content: DriveDocumentContent["content"] }>;
+      }>;
+    };
+    image?: { contentUri?: string; altText?: string };
+  }>;
+}
+
+/**
+ * Docs API shape for a single Google Docs "tab" — documents with multiple
+ * tabs nest each tab's content under documentTab.body instead of the
+ * top-level body, and tabs can themselves have child tabs.
+ */
+export interface DriveDocumentTab {
+  tabProperties?: { tabId?: string; title?: string };
+  documentTab?: { body?: DriveDocumentContent };
+  childTabs?: DriveDocumentTab[];
+}
+
 export interface DriveDocumentPayload {
   documentId: string;
   title: string;
-  body: {
-    content: Array<{
-      type: "paragraph" | "table" | "list" | "image";
-      paragraph?: {
-        elements?: Array<{ textRun?: { content?: string } }>;
-        paragraphStyle?: { namedStyleType?: string };
-        bullet?: { listId?: string; glyphType?: string };
-      };
-      table?: {
-        tableRows: Array<{
-          tableCells: Array<{ content: DriveDocumentPayload["body"]["content"] }>;
-        }>;
-      };
-      image?: { contentUri?: string; altText?: string };
-    }>;
-  };
+  // Present for single-tab documents fetched without includeTabsContent.
+  body?: DriveDocumentContent;
+  // Present (possibly with a single entry) once includeTabsContent=true is
+  // requested — the primary source of content for multi-tab documents.
+  tabs?: DriveDocumentTab[];
 }
