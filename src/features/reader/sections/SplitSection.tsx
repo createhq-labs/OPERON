@@ -16,12 +16,19 @@ export function SplitSection({ section }: { section: DocumentSection }) {
       )}
       <div
         className="reader-split-grid"
-        style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "48px", alignItems: "center" }}
+        style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "48px", alignItems: "start" }}
       >
         <div>{textBlocks.map((block, index) => renderBlock(block, index))}</div>
-        <div>{imageBlocks.map((block, index) => renderBlock(block, index))}</div>
+        <div className="reader-split-image" style={{ display: "flex", flexDirection: "column" }}>
+          {imageBlocks.map((block, index) => renderBlock(block, index))}
+        </div>
       </div>
-      <style>{`@media (max-width: 767px) { .reader-split-grid { grid-template-columns: 1fr !important; } }`}</style>
+      <style>{`
+        @media (max-width: 767px) { .reader-split-grid { grid-template-columns: 1fr !important; } }
+        /* Caps small/wide assets (logos, wordmarks) so they don't stretch into an
+           oddly squat bar just because the paired text column is much taller. */
+        .reader-split-image img { max-width: 360px; width: 100%; margin: 0 auto; }
+      `}</style>
     </section>
   );
 }

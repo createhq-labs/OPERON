@@ -1,6 +1,7 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { useRef } from "react";
+import { motion, useScroll, useTransform } from "framer-motion";
 import type { Document } from "@/core/types";
 import { S } from "@/styles/sharedUi";
 import { spring } from "@/styles/motionPresets";
@@ -11,24 +12,29 @@ function formatDate(iso: string): string {
   return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
-const wordContainer = {
-  hidden: { opacity: 1 },
-  show: { opacity: 1, transition: { staggerChildren: 0.06, delayChildren: 0.1 } },
-};
-
-const wordItem = {
-  hidden: { opacity: 0, y: 28 },
-  show: { opacity: 1, y: 0, transition: spring.soft },
-};
+const LETTER_STAGGER = 0.022;
+const WORD_STAGGER = 0.09;
 
 /** Title + only-existing metadata — never generates a summary/description beyond what the document already carries. */
 export function ReaderHero({ doc }: { doc: Document }) {
+  const heroRef = useRef<HTMLElement>(null);
   const words = doc.title.split(" ");
   const ghostWord = (doc.dept || "DOCS").toUpperCase();
   const metaItems = [doc.author, doc.updatedAt ? formatDate(doc.updatedAt) : null, doc.readTime].filter(Boolean);
 
+  // Ghost word drifts and recedes as the hero scrolls past — the same
+  // scroll-scrubbed motion the reference poster sections use on their huge
+  // background words, instead of a static faded backdrop.
+  const { scrollYProgress } = useScroll({ target: heroRef, offset: ["start start", "end start"] });
+  const ghostY = useTransform(scrollYProgress, [0, 1], [0, -70]);
+  const ghostScale = useTransform(scrollYProgress, [0, 1], [1, 1.12]);
+  const ghostOpacity = useTransform(scrollYProgress, [0, 1], [0.045, 0.012]);
+
+  let letterIndex = 0;
+
   return (
     <header
+      ref={heroRef}
       style={{
         position: "relative",
         overflow: "hidden",
@@ -38,8 +44,8 @@ export function ReaderHero({ doc }: { doc: Document }) {
         justifyContent: "center",
       }}
     >
-      {/* Ghost background word — faint, oversized, purely textural */}
-      <div
+      {/* Ghost background word — faint, oversized, drifts with scroll */}
+      <motion.div
         aria-hidden="true"
         style={{
           position: "absolute",
@@ -50,6 +56,9 @@ export function ReaderHero({ doc }: { doc: Document }) {
           pointerEvents: "none",
           userSelect: "none",
           zIndex: 0,
+          y: ghostY,
+          scale: ghostScale,
+          opacity: ghostOpacity,
         }}
       >
         <span
@@ -60,13 +69,12 @@ export function ReaderHero({ doc }: { doc: Document }) {
             lineHeight: 1,
             letterSpacing: "-0.04em",
             color: "var(--op-text)",
-            opacity: 0.04,
             whiteSpace: "nowrap",
           }}
         >
           {ghostWord}
         </span>
-      </div>
+      </motion.div>
 
       {/* Faint editorial grid overlay */}
       <div
@@ -94,10 +102,7 @@ export function ReaderHero({ doc }: { doc: Document }) {
           {doc.version && <span style={S.badge}>v{doc.version}</span>}
         </motion.div>
 
-        <motion.h1
-          variants={wordContainer}
-          initial="hidden"
-          animate="show"
+        <h1
           style={{
             fontFamily: "var(--font-display)",
             fontWeight: 700,
@@ -109,15 +114,28 @@ export function ReaderHero({ doc }: { doc: Document }) {
             display: "flex",
             flexWrap: "wrap",
             justifyContent: "center",
-            gap: "0 0.28em",
           }}
         >
-          {words.map((word, index) => (
-            <motion.span key={`${word}-${index}`} variants={wordItem} style={{ display: "inline-block" }}>
-              {word}
-            </motion.span>
+          {words.map((word, wordIdx) => (
+            <span key={`${word}-${wordIdx}`} style={{ display: "inline-flex", marginRight: "0.28em" }}>
+              {word.split("").map((letter, charIdx) => {
+                const delay = wordIdx * WORD_STAGGER + charIdx * LETTER_STAGGER;
+                letterIndex += 1;
+                return (
+                  <motion.span
+                    key={`${letterIndex}-${letter}-${charIdx}`}
+                    initial={{ opacity: 0, y: 32 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ ...spring.soft, delay }}
+                    style={{ display: "inline-block" }}
+                  >
+                    {letter}
+                  </motion.span>
+                );
+              })}
+            </span>
           ))}
-        </motion.h1>
+        </h1>
       </div>
 
       {metaItems.length > 0 && (

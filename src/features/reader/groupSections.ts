@@ -1,6 +1,49 @@
 import type { Block } from "@/core/types";
 import type { DocumentSection, SectionLayoutId } from "@/features/reader/types";
 
+// Matches "1. ", "2) " etc — a manually-typed ordinal, not real list
+// formatting (parsers only get real bullet/number metadata from sources
+// that expose it; plenty of source docs just type the numeral instead).
+const NUMBERED_PARAGRAPH = /^\d{1,3}[.)]\s+(.*)$/s;
+
+/**
+ * Consecutive paragraphs that are each hand-numbered ("1. …", "2. …") read as
+ * a list but render as indistinguishable stacked paragraphs — this regroups
+ * runs of 2+ into a single steps block so they get the numbered-circle
+ * treatment instead. A lone numbered paragraph (no run) is left untouched;
+ * one item isn't a list.
+ */
+function mergeNumberedParagraphsIntoSteps(blocks: Block[]): Block[] {
+  const result: Block[] = [];
+  let run: Array<{ title: string; original: Block }> = [];
+
+  const flushRun = () => {
+    if (run.length >= 2) {
+      result.push({
+        type: "steps",
+        items: run.map((item) => ({ title: item.title, description: "" })),
+      } as Block);
+    } else if (run.length === 1) {
+      result.push(run[0].original);
+    }
+    run = [];
+  };
+
+  for (const block of blocks) {
+    const content = block.type === "paragraph" ? (block as { content?: string }).content : undefined;
+    const match = typeof content === "string" ? NUMBERED_PARAGRAPH.exec(content) : null;
+    if (match) {
+      run.push({ title: match[1].trim(), original: block });
+      continue;
+    }
+    flushRun();
+    result.push(block);
+  }
+  flushRun();
+
+  return result;
+}
+
 /**
  * Splits a flat block stream into visual sections at every level-1 heading
  * (subheadings stay inside the current section — "each original major
@@ -24,7 +67,7 @@ export function groupBlocksIntoSections(blocks: Block[]): DocumentSection[] {
     sections.push(current);
   };
 
-  for (const block of blocks) {
+  for (const block of mergeNumberedParagraphsIntoSteps(blocks)) {
     if (block.type === "heading") {
       startSection(block);
       continue;
