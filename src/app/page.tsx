@@ -6,6 +6,7 @@ import { Menu } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import type { DriveDiagnostics } from "@/services/drive";
+import { getDriveConnectorStatus } from "@/services/drive";
 import type {
   DeptId, DocTag, Document, DriveParsedDocument, QuickActionItem, ResourceCategory,
   Role, RoleId, User, VisibilityScope,
@@ -148,6 +149,7 @@ export default function Page() {
   const [_providerReady,   setProviderReady]   = useState(false);
   const [_providerHealth,  setProviderHealth]  = useState(getProviderHealth());
   const [driveDiagnostics, _setDriveDiagnostics] = useState<DriveDiagnostics | null>(null);
+  const [driveConnected, setDriveConnected] = useState(false);
   const [cachedQuickActions, setCachedQuickActions] = useState<Array<{ id: string; label: string; description: string; category?: string }>>([]);
 
   // ── Team / users ─────────────────────────────────────────────────────────
@@ -232,6 +234,16 @@ export default function Page() {
 
     return () => { unsubChanges(); unsubHydration(); };
   }, []);
+
+  // ─── Drive connector status ────────────────────────────────────────────────
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    getDriveConnectorStatus().then((status) => {
+      if (!cancelled) setDriveConnected(Boolean(status?.connected));
+    });
+    return () => { cancelled = true; };
+  }, [user]);
 
   // ─── Quick actions cache ──────────────────────────────────────────────────
   useEffect(() => {
@@ -566,6 +578,7 @@ export default function Page() {
                 sections={visibleSections} selectedSection={selectedSection}
                 onClose={() => setIsMobileNavOpen(false)}
                 onSelect={handleSectionSelect}
+                driveConnected={driveConnected}
               />
             </motion.div>
           </motion.div>
@@ -647,6 +660,7 @@ export default function Page() {
             user={user} roleLabel={roleLabel}
             sections={visibleSections} selectedSection={selectedSection}
             onSelect={handleSectionSelect}
+            driveConnected={driveConnected}
           />
         </div>
 
