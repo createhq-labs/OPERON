@@ -1,12 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import type { LucideIcon } from "lucide-react";
 import {
   Building2, UserCheck, CalendarDays, TrendingUp, Flame, Trophy,
   ClipboardList, History, Activity as ActivityIcon, Sparkles,
-  ArrowUpRight, X, Inbox,
+  ArrowUpRight, X, Inbox, ChevronDown,
 } from "lucide-react";
 import type {
   User,
@@ -74,18 +74,6 @@ const ACTIVITY_META: Partial<Record<ActivityAction, { icon: LucideIcon; describe
   DEBOARDING_COMPLETED:  { icon: History,       describe: () => "Offboarding completed" },
 };
 
-function StatCard({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string | number }) {
-  return (
-    <div style={{ ...S.cardInner, border: "1px solid var(--op-border)", padding: "14px 16px" }} className="op-lift">
-      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-        <Icon size={12} color="var(--op-text-3)" />
-        <div style={T.sectionLabel}>{label}</div>
-      </div>
-      <div style={{ ...T.displayMd, marginTop: "6px" }}>{value}</div>
-    </div>
-  );
-}
-
 function SectionHeader({ icon: Icon, title }: { icon: LucideIcon; title: string }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px" }}>
@@ -126,6 +114,8 @@ export function EmployeeProfilePanel({
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [statusFilter, setStatusFilter] = useState<AttendanceDayStatus | "">("");
   const [showProbationHistory, setShowProbationHistory] = useState(false);
+  const [showLeaveHistory, setShowLeaveHistory] = useState(false);
+  const [showHolidayHistory, setShowHolidayHistory] = useState(false);
 
   // Editing state — only reachable when `editable` is true.
   const [editVersion, setEditVersion] = useState(0);
@@ -306,8 +296,8 @@ export function EmployeeProfilePanel({
       {!loadError && (
         <>
           {/* Employment Details */}
-          <div style={{ ...S.cardInner, border: "1px solid var(--op-border)", padding: "16px 18px" }}>
-            <SectionHeader icon={Building2} title="Employment Details" />
+          <div style={{ ...S.cardInner, border: "1px solid var(--op-border)", padding: "22px 24px" }}>
+            <SectionHeader icon={Building2} title="Employment" />
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "12px" }}>
               <InfoField label="Date Joined" value={person.dateJoined ?? "Unknown"} />
               <InfoField label="Department" value={person.departmentId ? getDepartmentLabel(person.departmentId) : "—"} />
@@ -317,8 +307,8 @@ export function EmployeeProfilePanel({
           </div>
 
           {/* Attendance Summary */}
-          <div>
-            <SectionHeader icon={TrendingUp} title="Attendance Summary" />
+          <div style={{ marginTop: "18px" }}>
+            <div style={{ marginBottom: "18px" }}><div style={T.sectionLabel}>Performance</div><h3 style={{ ...T.displayMd, margin: "5px 0 0" }}>Attendance analytics</h3></div>
             <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center", marginBottom: "14px" }}>
               {PRESETS.map((p) => (
                 <button key={p} type="button" style={S.pill(preset === p) as React.CSSProperties} onClick={() => setPreset(p)}>
@@ -334,18 +324,28 @@ export function EmployeeProfilePanel({
               )}
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "10px", marginBottom: "16px" }}>
-              <StatCard icon={CalendarDays} label="Total Working Days" value={summary.totalWorkingDays} />
-              <StatCard icon={STATUS_TOKENS.present.icon} label="Present Days" value={summary.present} />
-              <StatCard icon={STATUS_TOKENS.wfh.icon} label="WFH Days" value={summary.wfh} />
-              <StatCard icon={STATUS_TOKENS.leave.icon} label="Leave Days" value={summary.leave} />
-              <StatCard icon={STATUS_TOKENS.holiday.icon} label="Holiday Count" value={summary.holidayCount} />
-              <StatCard icon={TrendingUp} label="Attendance %" value={`${summary.attendancePercentage}%`} />
-              <StatCard icon={Flame} label="Current Streak" value={summary.currentStreak} />
-              <StatCard icon={Trophy} label="Longest Streak" value={summary.longestStreak} />
+            <div className="attendance-metric-grid" style={{ display: "grid", gridTemplateColumns: "minmax(250px, 1.1fr) minmax(340px, 1.55fr) minmax(210px, .9fr)", gap: "12px", marginBottom: "40px" }}>
+              <div style={{ ...S.cardInner, border: "1px solid var(--op-border)", padding: "26px", minHeight: "190px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><span style={T.sectionLabel}>Attendance</span><TrendingUp size={16} color="var(--op-text-3)" /></div>
+                <div>
+                  <div style={{ fontFamily: "var(--font-display)", fontSize: "clamp(52px, 7vw, 76px)", lineHeight: .9, letterSpacing: "-.055em", fontWeight: 600 }}>{summary.attendancePercentage}<span style={{ fontSize: ".38em", marginLeft: "3px" }}>%</span></div>
+                  <div style={{ height: "7px", borderRadius: "99px", background: "var(--op-surface-3)", overflow: "hidden", marginTop: "22px" }}><motion.div initial={{ width: 0 }} animate={{ width: `${Math.min(100, summary.attendancePercentage)}%` }} transition={{ duration: .65, ease: "easeOut" }} style={{ height: "100%", borderRadius: "inherit", background: "var(--op-accent)" }} /></div>
+                </div>
+              </div>
+              <div style={{ ...S.cardInner, border: "1px solid var(--op-border)", padding: "26px", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "18px" }}>
+                <MetricValue value={summary.present} label="Present" color={STATUS_TOKENS.present.fg} icon={STATUS_TOKENS.present.icon} />
+                <MetricValue value={summary.wfh} label="WFH" color={STATUS_TOKENS.wfh.fg} icon={STATUS_TOKENS.wfh.icon} />
+                <MetricValue value={summary.leave} label="Leave" color={STATUS_TOKENS.leave.fg} icon={STATUS_TOKENS.leave.icon} />
+              </div>
+              <div style={{ ...S.cardInner, border: "1px solid var(--op-border)", padding: "18px 22px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+                <SecondaryMetric icon={CalendarDays} label="Working days" value={summary.totalWorkingDays} />
+                <SecondaryMetric icon={Sparkles} label="Holidays" value={summary.holidayCount} />
+                <SecondaryMetric icon={Flame} label="Current streak" value={summary.currentStreak} />
+                <SecondaryMetric icon={Trophy} label="Longest streak" value={summary.longestStreak} last />
+              </div>
             </div>
 
-            <div style={{ ...S.cardInner, border: "1px solid var(--op-border)", padding: "16px 18px", marginBottom: "16px" }}>
+            <div style={{ ...S.cardInner, border: "1px solid var(--op-border)", padding: "clamp(20px, 3vw, 34px)", marginBottom: "48px", boxShadow: "0 22px 70px rgba(0,0,0,.12)" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
                 <button type="button" style={S.btnGhost} onClick={() => setCalendarMonth((m) => addMonths(m, -1))}>← Prev</button>
                 <span style={T.cardTitle}>{monthLabel(calendarMonth)}</span>
@@ -390,8 +390,8 @@ export function EmployeeProfilePanel({
               </div>
             </div>
 
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", marginBottom: "10px" }}>
-              <span style={T.cardTitle}>Attendance Register</span>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: "10px", marginBottom: "22px" }}>
+              <div><div style={T.sectionLabel}>History</div><h3 style={{ ...T.displayMd, margin: "5px 0 0" }}>Attendance timeline</h3></div>
               <div style={{ display: "flex", gap: "8px" }}>
                 <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as AttendanceDayStatus | "")} style={S.select}>
                   <option value="">All statuses</option>
@@ -403,24 +403,26 @@ export function EmployeeProfilePanel({
               </div>
             </div>
             {registerRows.length === 0 ? (
-              <EmptyBlock icon={CalendarDays} title="No attendance records" desc="Nothing marked in this range yet." />
+              <div style={{ padding: "28px 0", borderTop: "1px solid var(--op-border)", borderBottom: "1px solid var(--op-border)" }}><EmptyBlock icon={CalendarDays} title="No attendance activity" desc="Marked days will appear here chronologically." /></div>
             ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 0, paddingLeft: "14px" }}>
                 {registerRows.map((row) => {
                   const tok = STATUS_TOKENS[row.status];
                   const Icon = tok.icon;
                   const approvedById = row.leave?.hrApprovedById ?? row.leave?.tlApprovedById;
                   const approvedAt   = row.leave?.hrApprovedAt ?? row.leave?.tlApprovedAt;
                   return (
-                    <div
+                    <motion.div
                       key={row.iso}
-                      className="op-row-interactive"
+                      className="attendance-timeline-row"
+                      whileHover={{ x: 3 }}
                       style={{
-                        ...S.cardInner, border: "1px solid var(--op-border)", padding: "8px 14px",
-                        display: "grid", gridTemplateColumns: "100px 100px 1fr 140px 100px 1fr", gap: "10px", alignItems: "center",
+                        position: "relative", borderLeft: "1px solid var(--op-border)", padding: "14px 14px 14px 28px",
+                        display: "grid", gridTemplateColumns: "110px 120px minmax(0,1fr) 140px", gap: "12px", alignItems: "center",
                       }}
                     >
-                      <span style={T.bodySmall}>{row.iso}</span>
+                      <span style={{ position: "absolute", left: "-5px", top: "20px", width: "9px", height: "9px", borderRadius: "50%", background: tok.fg, boxShadow: "0 0 0 4px var(--op-bg)" }} />
+                      <span style={{ ...T.bodySmall, color: "var(--op-text-3)" }}>{new Date(`${row.iso}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</span>
                       <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", ...T.bodySmall, color: tok.fg }}>
                         <Icon size={12} /> {tok.label}
                       </span>
@@ -428,7 +430,7 @@ export function EmployeeProfilePanel({
                       <span style={T.bodySmall}>{approvedById ? getUserById(approvedById)?.name ?? approvedById : "—"}</span>
                       <span style={T.bodySmall}>{approvedAt ?? "—"}</span>
                       <span style={T.bodySmall}>—</span>
-                    </div>
+                    </motion.div>
                   );
                 })}
               </div>
@@ -436,8 +438,9 @@ export function EmployeeProfilePanel({
           </div>
 
           {/* Leave History */}
-          <div>
-            <SectionHeader icon={ClipboardList} title="Leave History" />
+          <div style={{ borderTop: "1px solid var(--op-border)", paddingTop: "8px" }}>
+            <DisclosureButton icon={ClipboardList} title="Leave history" count={leaveHistory.length} open={showLeaveHistory} onClick={() => setShowLeaveHistory((value) => !value)} />
+            <AnimatePresence initial={false}>{showLeaveHistory && <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: .22 }} style={{ overflow: "hidden", paddingTop: "10px" }}>
             {leaveHistory.length === 0 ? (
               <EmptyBlock icon={ClipboardList} title="No leave or WFH requests" desc="Requests this employee submits will show up here." />
             ) : (
@@ -462,11 +465,13 @@ export function EmployeeProfilePanel({
                 })}
               </div>
             )}
+            </motion.div>}</AnimatePresence>
           </div>
 
           {/* Holiday History */}
-          <div>
-            <SectionHeader icon={Sparkles} title="Holiday History" />
+          <div style={{ borderTop: "1px solid var(--op-border)", paddingTop: "8px" }}>
+            <DisclosureButton icon={Sparkles} title="Holiday history" count={tenureHolidays.length + tenureSundayCount} open={showHolidayHistory} onClick={() => setShowHolidayHistory((value) => !value)} />
+            <AnimatePresence initial={false}>{showHolidayHistory && <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: .22 }} style={{ overflow: "hidden", paddingTop: "10px" }}>
             {tenureSundayCount > 0 && (
               <div style={{ ...T.bodySmall, opacity: 0.7, marginBottom: "8px" }}>
                 {tenureSundayCount} Sunday{tenureSundayCount === 1 ? "" : "s"} (weekly off) during this tenure.
@@ -481,6 +486,7 @@ export function EmployeeProfilePanel({
                 ))}
               </div>
             )}
+            </motion.div>}</AnimatePresence>
           </div>
 
           {/* Probation Timeline */}
@@ -563,7 +569,48 @@ export function EmployeeProfilePanel({
           </div>
         </>
       )}
+      <style>{`
+        .attendance-timeline-row > :nth-child(6),
+        .attendance-timeline-row > :nth-child(7) { display: none; }
+        @media (max-width: 980px) {
+          .attendance-metric-grid { grid-template-columns: 1fr !important; }
+        }
+        @media (max-width: 680px) {
+          .attendance-timeline-row { grid-template-columns: 92px 1fr !important; }
+          .attendance-timeline-row > :nth-child(4),
+          .attendance-timeline-row > :nth-child(5) { grid-column: 2; }
+        }
+      `}</style>
     </motion.div>
+  );
+}
+
+function MetricValue({ value, label, color, icon: Icon }: { value: number; label: string; color: string; icon: LucideIcon }) {
+  return (
+    <motion.div whileHover={{ y: -2 }} transition={{ duration: .18 }} style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", minWidth: 0 }}>
+      <div style={{ width: "34px", height: "34px", borderRadius: "11px", display: "grid", placeItems: "center", background: `${color}16`, border: `1px solid ${color}30` }}><Icon size={15} color={color} /></div>
+      <div><div style={{ fontFamily: "var(--font-display)", fontSize: "clamp(32px, 4vw, 46px)", lineHeight: 1, letterSpacing: "-.035em", fontWeight: 600 }}>{value}</div><div style={{ ...T.caption, marginTop: "7px", color }}>{label}</div></div>
+    </motion.div>
+  );
+}
+
+function SecondaryMetric({ icon: Icon, label, value, last = false }: { icon: LucideIcon; label: string; value: number; last?: boolean }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 0", borderBottom: last ? "none" : "1px solid var(--op-border)" }}>
+      <Icon size={13} color="var(--op-text-3)" />
+      <span style={{ ...T.caption, flex: 1 }}>{label}</span>
+      <span style={{ ...T.bodySmall, fontWeight: 650 }}>{value}</span>
+    </div>
+  );
+}
+
+function DisclosureButton({ icon: Icon, title, count, open, onClick }: { icon: LucideIcon; title: string; count: number; open: boolean; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} style={{ width: "100%", border: 0, background: "transparent", color: "inherit", padding: "13px 2px", display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", textAlign: "left" }}>
+      <Icon size={15} color="var(--op-text-3)" />
+      <span style={{ ...T.cardTitle, flex: 1 }}>{title} <span style={{ color: "var(--op-text-3)", fontWeight: 500 }}>({count})</span></span>
+      <motion.span animate={{ rotate: open ? 180 : 0 }} transition={{ duration: .2 }} style={{ display: "inline-flex" }}><ChevronDown size={16} color="var(--op-text-3)" /></motion.span>
+    </button>
   );
 }
 

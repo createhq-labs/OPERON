@@ -12,6 +12,11 @@ export function renderTable(block: TableBlock, _index: number) {
 
   if (rows.length === 0 && headers.length === 0) return null;
 
+  // Sticky header only kicks in once a table is tall enough that scrolling past
+  // its own header would lose column context — short tables render exactly as
+  // before (no bounded height, no sticky positioning).
+  const isTall = rows.length > 8;
+
   return (
     <div
       style={{
@@ -20,19 +25,14 @@ export function renderTable(block: TableBlock, _index: number) {
         overflow:     "hidden",
       }}
     >
-      <div style={{ overflowX: "auto" }}>
+      <div style={{ overflowX: "auto", ...(isTall ? { maxHeight: "480px", overflowY: "auto" as const } : {}) }}>
         <table
           style={{ width: "100%", borderCollapse: "collapse", minWidth: "400px" }}
           role="table"
         >
           {headers.length > 0 && (
             <thead>
-              <tr
-                style={{
-                  background:   "var(--op-surface-2)",
-                  borderBottom: "1px solid var(--op-border)",
-                }}
-              >
+              <tr style={{ borderBottom: "1px solid var(--op-border)" }}>
                 {headers.map((header, colIndex) => (
                   <th
                     key={`header-${colIndex}`}
@@ -47,6 +47,11 @@ export function renderTable(block: TableBlock, _index: number) {
                       textTransform: "uppercase",
                       color:         "var(--op-text-3)",
                       whiteSpace:    "nowrap",
+                      background:    "var(--op-surface-2)",
+                      // Sticky relative to the scrollable wrapper above (its own
+                      // bounded box), never the page — never fights the app's
+                      // sticky progress bar/TOC. th, not thead, for Safari.
+                      ...(isTall ? { position: "sticky" as const, top: 0, zIndex: 1 } : {}),
                     }}
                   >
                     {header}

@@ -240,6 +240,38 @@ export const Sp = {
 
 export const S = {
 
+  /** Borderless page section. Hierarchy comes from typography and spacing. */
+  section: {
+    display:       "flex",
+    flexDirection: "column" as const,
+    gap:           Sp["8"],
+  },
+  /** Use once around a related task; never recursively. */
+  group: {
+    background:   "var(--op-surface)",
+    border:       "1px solid var(--op-border)",
+    borderRadius: "var(--r-lg)",
+  },
+  /** Quiet secondary fill without another outline. */
+  inset: {
+    background:   "var(--op-surface-2)",
+    borderRadius: "var(--r-md)",
+  },
+  /** Canonical list/table row; use dividers instead of row cards. */
+  row: {
+    background:   "transparent",
+    border:       "none",
+    borderBottom: "1px solid var(--op-border)",
+    padding:      `${Sp["3"]} ${Sp["4"]}`,
+  },
+  toolbar: {
+    minHeight:  "48px",
+    display:    "flex",
+    alignItems: "center",
+    gap:        Sp["2"],
+    flexWrap:   "wrap" as const,
+  },
+
   // ── Surfaces ─────────────────────────────────────────────────────────────
   card: {
     background:           "var(--op-surface)",

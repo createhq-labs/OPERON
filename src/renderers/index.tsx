@@ -1,7 +1,9 @@
 "use client";
 
 import React from "react";
+import { motion } from "framer-motion";
 import type { Block } from "@/core/types";
+import { imageReveal } from "@/styles/motionPresets";
 import type {
   HeadingBlock,
   ParagraphBlock,
@@ -30,7 +32,7 @@ import { renderHeading }    from "@/renderers/renderHeading";
 const BLOCK_GAP: Record<string, string> = {
   heading:    "0",   // heading manages its own top margin
   subheading: "0",
-  paragraph:  "12px",
+  paragraph:  "18px",
   warning:    "24px",
   note:       "24px",
   callout:    "24px",
@@ -146,8 +148,12 @@ function renderCode(block: Block, index: number): React.ReactNode {
 function renderImage(block: Block, index: number): React.ReactNode {
   const b = block as { id?: string; content: { src: string; alt?: string } };
   return (
-    <figure
+    <motion.figure
       key={b.id ?? `image-${index}`}
+      variants={imageReveal}
+      initial="hidden"
+      whileInView="show"
+      viewport={{ once: true, amount: 0.3 }}
       style={{ margin: 0 }}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -175,7 +181,7 @@ function renderImage(block: Block, index: number): React.ReactNode {
           {b.content.alt}
         </figcaption>
       )}
-    </figure>
+    </motion.figure>
   );
 }
 

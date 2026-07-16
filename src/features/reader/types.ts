@@ -7,7 +7,11 @@ export type SectionLayoutId =
   | "numbered-process"
   | "editorial-table"
   | "image-led"
-  | "checklist";
+  | "checklist"
+  | "quote"
+  | "gallery"
+  | "timeline"
+  | "feature-cards";
 
 export interface DocumentSection {
   id: string;

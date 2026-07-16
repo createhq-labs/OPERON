@@ -8,12 +8,13 @@ export function renderParagraph(block: ParagraphBlock, index: number) {
       key={block.id ?? `paragraph-${index}`}
       style={{
         fontFamily: "var(--font-body)",
-        fontSize: "var(--text-14)",
+        fontSize: "var(--text-16)",
         fontWeight: 400,
-        lineHeight: 1.8,
-        color: "var(--op-text-2)",
+        lineHeight: 1.75,
+        letterSpacing: "-0.005em",
+        color: "var(--op-text)",
         margin: 0,
-        maxWidth: "68ch",
+        maxWidth: "65ch",
       }}
     >
       {block.content}

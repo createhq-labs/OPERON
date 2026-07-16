@@ -6,6 +6,7 @@ import type { Document } from "@/core/types";
 import { groupBlocksIntoSections } from "@/features/reader/groupSections";
 import { SectionRenderer } from "@/features/reader/sections/SectionRenderer";
 import { ReaderHero } from "@/features/reader/ReaderHero";
+import { ReaderFooter } from "@/features/reader/ReaderFooter";
 import { TableOfContents } from "@/features/reader/TableOfContents";
 import { ReadingProgressBar } from "@/features/reader/ReadingProgressBar";
 import { useDocumentReadPersistence } from "@/features/reader/useDocumentReadPersistence";
@@ -83,32 +84,7 @@ export function DocumentReaderShell({ doc, onBack }: { doc: Document; onBack: ()
             <SectionRenderer key={section.id} section={section} />
           ))}
 
-          <div style={{ display: "flex", justifyContent: "space-between", padding: "40px 0" }}>
-            {prevId ? (
-              <motion.button
-                type="button"
-                onClick={() => scrollToId(prevId)}
-                whileHover={{ x: -2 }}
-                whileTap={{ scale: 0.985 }}
-                style={S.btnGhost}
-              >
-                ← Previous section
-              </motion.button>
-            ) : (
-              <span />
-            )}
-            {nextId && (
-              <motion.button
-                type="button"
-                onClick={() => scrollToId(nextId)}
-                whileHover={{ x: 2 }}
-                whileTap={{ scale: 0.985 }}
-                style={S.btnGhost}
-              >
-                Next section →
-              </motion.button>
-            )}
-          </div>
+          <ReaderFooter prevId={prevId} nextId={nextId} onNavigate={scrollToId} />
         </div>
 
         <div style={{ position: "sticky", top: "24px" }}>

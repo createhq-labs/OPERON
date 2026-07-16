@@ -92,14 +92,36 @@ function chooseDefaultLayout(section: DocumentSection): SectionLayoutId {
   const bodyBlocks = section.headingBlock ? section.blocks.slice(1) : section.blocks;
   const types = bodyBlocks.map((block) => block.type);
 
+  if (types.includes("timeline")) return "timeline";
   if (types.includes("table")) return "editorial-table";
   if (types.includes("checklist")) return "checklist";
   if (types.includes("steps")) return "numbered-process";
 
+  // A lone callout promotes to a full-bleed pull-quote — only "callout", never
+  // warning/note/success (a warning rendered as an oversized quote would be
+  // misleading), and only when the callout IS the whole section. A callout
+  // alongside other content still renders inline via the regular alert card.
+  if (bodyBlocks.length === 1 && bodyBlocks[0].type === "callout") return "quote";
+
+  // Heading-gated and capped — a short, heading-introduced list of short items
+  // reads as "N things" (feature bullets); a heading-less or long bullet list
+  // (appendix/footnote/glossary shape) is more likely to want to stay plain.
+  if (
+    section.headingBlock &&
+    types.length >= 3 &&
+    types.length <= 8 &&
+    types.every((type) => type === "list_item") &&
+    bodyBlocks.every((block) => ((block as { content?: string }).content ?? "").length <= 60)
+  ) {
+    return "feature-cards";
+  }
+
   const imageCount = types.filter((type) => type === "image").length;
   const textCount = bodyBlocks.filter((block) => block.type === "paragraph" || block.type === "list_item").length;
 
-  if (imageCount > 0 && textCount === 0) return "image-led";
+  if (imageCount > 0 && bodyBlocks.length === imageCount) {
+    return imageCount >= 3 ? "gallery" : "image-led";
+  }
   if (imageCount > 0 && textCount > 0) return "split";
 
   if (bodyBlocks.length === 1 && bodyBlocks[0].type === "paragraph") {

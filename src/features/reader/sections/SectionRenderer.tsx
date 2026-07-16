@@ -9,6 +9,10 @@ import { NumberedProcessSection } from "@/features/reader/sections/NumberedProce
 import { EditorialTableSection } from "@/features/reader/sections/EditorialTableSection";
 import { ImageLedSection } from "@/features/reader/sections/ImageLedSection";
 import { ChecklistSection } from "@/features/reader/sections/ChecklistSection";
+import { QuoteSection } from "@/features/reader/sections/QuoteSection";
+import { GallerySection } from "@/features/reader/sections/GallerySection";
+import { TimelineSection } from "@/features/reader/sections/TimelineSection";
+import { FeatureCardsSection } from "@/features/reader/sections/FeatureCardsSection";
 import { spring } from "@/styles/motionPresets";
 
 function renderLayout(section: DocumentSection) {
@@ -25,6 +29,14 @@ function renderLayout(section: DocumentSection) {
       return <ImageLedSection section={section} />;
     case "checklist":
       return <ChecklistSection section={section} />;
+    case "quote":
+      return <QuoteSection section={section} />;
+    case "gallery":
+      return <GallerySection section={section} />;
+    case "timeline":
+      return <TimelineSection section={section} />;
+    case "feature-cards":
+      return <FeatureCardsSection section={section} />;
     case "narrow-column":
     default:
       return <NarrowColumnSection section={section} />;
