@@ -1,0 +1,10 @@
+import { workforceRpc } from "./client";
+import type { UUID } from "./types";
+export const listDeboardingDashboard = (status?: string, type?: "employee" | "creator") => workforceRpc<Record<string, unknown>[]>("list_deboarding_dashboard", { p_status: status ?? null, p_deboarding_type: type ?? null });
+export const initiateEmployeeDeboarding = (userId: UUID, reason: string) => workforceRpc("initiate_employee_deboarding", { p_user_id: userId, p_reason: reason });
+export const initiateCreatorDeboarding = (userId: UUID, reason: string) => workforceRpc("initiate_creator_deboarding", { p_user_id: userId, p_reason: reason });
+export const decideCreatorDeboarding = (id: UUID, approved: boolean, reason?: string) => workforceRpc("decide_creator_deboarding", { p_deboarding_id: id, p_approved: approved, p_reason: reason ?? null });
+export const startDeboardingChecklist = (id: UUID) => workforceRpc("start_deboarding_checklist", { p_deboarding_id: id });
+export const setChecklistItem = (itemId: UUID, complete: boolean, note?: string) => workforceRpc("set_deboarding_checklist_item", { p_checklist_item_id: itemId, p_is_completed: complete, p_note: note ?? null });
+export const completeDeboarding = (id: UUID) => workforceRpc("complete_deboarding", { p_deboarding_id: id });
+export const cancelDeboarding = (id: UUID, reason: string) => workforceRpc("cancel_deboarding", { p_deboarding_id: id, p_reason: reason });

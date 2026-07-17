@@ -123,9 +123,12 @@ export interface User {
   avatar:         string;
   userType:       UserType;
   roleId:         RoleId;
+  /** Normalized authorization source from global.roles.name. */
+  roleName?:      string;
   departmentId?:  DeptId;
   teamId?:        string;
   supervisorId?:  string;
+  designationId?: string;
   permissionIds:  PermissionId[];
   createdById:    string;
   status:         UserStatus;

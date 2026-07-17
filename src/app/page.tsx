@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Menu } from "lucide-react";
+import { Menu, FileText } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import type { DriveDiagnostics } from "@/services/drive";
@@ -20,7 +20,7 @@ import {
   getPinnedDocuments, getQuickActions, getResourceById, getRoleLabel, getRoles,
   getSupervisors, getTeams, getUserById, getAssignableDepartments,
   getDocumentEntity, searchDocuments, searchResources,
-  updateDocumentMetadata, archiveDocument, replaceDocumentFile,
+  updateDocumentMetadata, replaceDocumentFile,
   canEditDocuments, canDeleteDocuments,
 } from "@/core/operon";
 import {
@@ -39,8 +39,8 @@ import { openFloatingLayer, subscribeFloatingLayerClose } from "@/lib/floatingLa
 import { motionPreset } from "@/styles/motionPresets";
 import { S } from "@/styles/sharedUi";
 import { DEFAULT_ROLE_ID, ROLE_SELECTION_OPTIONS } from "@/core/roles";
-import { canAccessWorkforce } from "@/security/permissions";
-import { UPLOAD_ROLES } from "@/security/rolePolicies";
+import { archiveDocument as archiveWorkforceDocument } from "@/lib/workforce/documents";
+import { canAccessWorkforce, canUploadDocument } from "@/security/permissions";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -56,6 +56,12 @@ const SECTION_NAMES = {
   workforce: "Workforce",
   docs:      "Document",
 } as const;
+
+function formatShortDate(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
 
 const TAG_LABELS: Record<DocTag, string> = {
   sop:        "SOP",
@@ -125,11 +131,13 @@ export default function Page() {
   const [renameDraft,     setRenameDraft]     = useState<{ id: string; title: string } | null>(null);
   const [deleteTarget,    setDeleteTarget]    = useState<Document | null>(null);
   const [docActionError,  setDocActionError]  = useState("");
+  const [archiveReason,   setArchiveReason]   = useState("");
   const [replaceTargetId, setReplaceTargetId] = useState<string | null>(null);
   const replaceFileInputRef = useRef<HTMLInputElement | null>(null);
 
   // ── Upload ───────────────────────────────────────────────────────────────
   const [uploadTitle,         setUploadTitle]         = useState("");
+  const [uploadDescription,   setUploadDescription]   = useState("");
   const [uploadCategory,      setUploadCategory]      = useState<DocTag>("sop");
   const [uploadDepartment,    setUploadDepartment]    = useState<DeptId>("operations");
   const [uploadVisibility,    setUploadVisibility]    = useState<VisibilityScope>("department");
@@ -340,15 +348,14 @@ export default function Page() {
   const activityCanView   = user ? canViewActivity(user)    : false;
   // Gate upload panel against the policy set, not stored permissionIds, so existing
   // Creator/Employee/Intern users in the DB are immediately blocked without a migration.
-  const userCanUpload = user ? UPLOAD_ROLES.has(user.roleId) : false;
+  const userCanUpload = user ? canUploadDocument(user) : false;
   const financeAccess     = user ? canPublishGlobally(user) : false;
   const roleManagerAccess = user ? canManageRoles(user)     : false;
 
   const visibleSections = useMemo(() => {
     if (!user) return ["signin"] as Section[];
-    const s: Section[] = ["home", "library"];
+    const s: Section[] = ["home", "library", "resources"];
     if (canAccessWorkforce(user)) s.push("workforce");
-    if (resourceCanView)   s.push("resources");
     if (activityCanView)   s.push("activity");
     if (financeAccess)     s.push("finance");
     if (userCanManage)     s.push("team");
@@ -499,7 +506,7 @@ export default function Page() {
       const departmentId = user.roleId === "role_cofounder" ? uploadDepartment : (user.departmentId ?? "operations");
       await createDocumentUploadFromFile(uploadFile, {
         title:            uploadTitle.trim(),
-        description:      "",
+        description:      uploadDescription.trim(),
         departmentId,
         authorId:         user.id,
         tag:              uploadCategory,
@@ -512,6 +519,7 @@ export default function Page() {
       });
       setUploadStatus(`"${uploadTitle.trim()}" added to the library.`);
       setUploadTitle("");
+      setUploadDescription("");
       setUploadFile(null);
       setSelectedRoleIds([]);
       setSelectedUserIds([]);
@@ -535,14 +543,15 @@ export default function Page() {
     }
   }
 
-  function handleDeleteConfirm() {
-    if (!user || !deleteTarget) return;
+  async function handleDeleteConfirm() {
+    if (!user || !deleteTarget || !archiveReason.trim()) return;
     try {
-      archiveDocument(user, deleteTarget.id);
+      await archiveWorkforceDocument(deleteTarget.id, archiveReason.trim());
       setDeleteTarget(null);
+      setArchiveReason("");
       setDocActionError("");
     } catch (err) {
-      setDocActionError(err instanceof Error ? err.message : "Failed to delete document.");
+      setDocActionError(err instanceof Error ? err.message : "Failed to archive document.");
     }
   }
 
@@ -719,7 +728,7 @@ export default function Page() {
           {/* Top bar */}
           <motion.header
             initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}
-            style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "16px", padding: "10px 18px", ...S.card }}
+            style={{ position: "relative", zIndex: 30, display: "flex", alignItems: "center", justifyContent: "space-between", gap: "16px", padding: "10px 18px", ...S.card }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
               {/* Mobile menu — hidden on desktop */}
@@ -844,13 +853,24 @@ export default function Page() {
                           onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = "var(--op-border-hover)"; }}
                           onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = "var(--op-border)"; }}
                         >
-                          {documentView === "grid" && <div style={{ height: "80px", width: "100%", borderRadius: "var(--r-sm)", background: "rgba(255,255,255,0.04)" }} />}
-                          <div style={{ minWidth: 0, flex: 1 }}>
+                          {documentView === "grid" && (
+                            <div style={{ width: "40px", height: "40px", borderRadius: "var(--r-md)", background: "var(--op-accent-dim)", border: "1px solid rgba(245,166,35,0.2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                              <FileText size={18} color="var(--op-accent)" strokeWidth={1.6} aria-hidden="true" />
+                            </div>
+                          )}
+                          <div style={{ minWidth: 0, flex: 1, display: "flex", flexDirection: "column", gap: "4px" }}>
                             <div style={{ fontFamily: "var(--font-ui)", fontSize: "var(--text-14)", fontWeight: 600, color: "var(--op-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.title}</div>
-                            <div style={{ fontFamily: "var(--font-body)", fontSize: "var(--text-12)", color: "var(--op-text-2)", marginTop: "4px", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as const }}>{doc.description}</div>
+                            {doc.description && (
+                              <div style={{ fontFamily: "var(--font-body)", fontSize: "var(--text-12)", lineHeight: 1.5, color: "var(--op-text-2)", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as const }}>{doc.description}</div>
+                            )}
                           </div>
-                          <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
-                            <span style={S.badge}>{TAG_LABELS[doc.tag]}</span>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: documentView === "grid" ? "100%" : "auto", gap: "8px" }}>
+                            <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
+                              <span style={S.badge}>{TAG_LABELS[doc.tag]}</span>
+                              {doc.updatedAt && (
+                                <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-11)", color: "var(--op-text-3)" }}>{formatShortDate(doc.updatedAt)}</span>
+                              )}
+                            </div>
                             {user && (
                               <DocActionsMenu
                                 canEdit={canEditDocuments(user)}
@@ -878,6 +898,14 @@ export default function Page() {
                     </div>
 
                     <input value={uploadTitle} onChange={(e) => setUploadTitle(e.target.value)} placeholder="Document title" style={S.input} />
+
+                    <textarea
+                      value={uploadDescription}
+                      onChange={(e) => setUploadDescription(e.target.value)}
+                      placeholder="Short description (optional) — shown on the library card"
+                      rows={2}
+                      style={{ ...S.textarea, resize: "vertical" as const }}
+                    />
 
                     <div style={{ display: "grid", gridTemplateColumns: user.roleId === "role_cofounder" ? "1fr 1fr" : "1fr", gap: "10px" }}>
                       <select value={uploadCategory} onChange={(e) => setUploadCategory(e.target.value as DocTag)} style={S.select}>
@@ -1007,18 +1035,19 @@ export default function Page() {
 
                 <Modal
                   open={deleteTarget !== null}
-                  title="Delete document"
+                  title="Archive document"
                   onClose={() => setDeleteTarget(null)}
                   footer={
                     <>
                       <Button variant="ghost" onClick={() => setDeleteTarget(null)}>Cancel</Button>
-                      <Button variant="danger" onClick={handleDeleteConfirm}>Delete</Button>
+                      <Button variant="danger" onClick={() => void handleDeleteConfirm()} disabled={!archiveReason.trim()}>Archive</Button>
                     </>
                   }
                 >
                   <p style={{ fontFamily: "var(--font-body)", fontSize: "var(--text-14)", color: "var(--op-text-2)", margin: 0 }}>
-                    Remove <strong style={{ color: "var(--op-text)" }}>{deleteTarget?.title}</strong> from the library? This can be undone by an admin, but won't appear for anyone until then.
+                    Remove <strong style={{ color: "var(--op-text)" }}>{deleteTarget?.title}</strong> from the library? This can be undone by an admin, but won&apos;t appear for anyone until then.
                   </p>
+                  <input value={archiveReason} onChange={(event) => setArchiveReason(event.target.value)} placeholder="Reason for archiving" style={{ ...S.input, marginTop: "12px" }} />
                   {docActionError && <p style={{ ...S.errorText, marginTop: "8px" }}>{docActionError}</p>}
                 </Modal>
 

@@ -174,3 +174,11 @@ Each primitive must use `T`, `Sp`, `S`, `motionPreset`, and semantic status toke
 - No looping decorative motion in authenticated application surfaces outside the Reader.
 - Every route uses the same shell width, page padding, heading scale, and section rhythm.
 - New UI cannot introduce raw visual tokens without extending the design system first.
+
+## Design system freeze
+
+The shared primitive layer in `src/components/ui` is the single source of truth for application UI. New route-specific buttons, cards, inputs, tabs, badges, overlays, timelines, tables, or matrix wrappers are prohibited unless the shared primitive cannot express a required behavior. Any necessary visual variation must be added as a documented primitive variant and reused from there.
+
+Route migration replaces legacy primitives; it does not wrap them. Obsolete route helpers and styles must be deleted when their last active use is removed. A migrated route is accepted only when shared controls, empty states, surfaces, data displays, and motion presets are used wherever practical, type-check passes, and the production build succeeds.
+
+Home is the canonical reference for page rhythm, typography, surface treatment, toolbar composition, and motion. Subsequent routes inherit those decisions. After Home and Attendance, migration pauses for a report before Employee Profile begins.

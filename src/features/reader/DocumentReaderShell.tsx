@@ -13,6 +13,7 @@ import { useDocumentReadPersistence } from "@/features/reader/useDocumentReadPer
 import { useSectionProgress } from "@/features/reader/useSectionProgress";
 import { S } from "@/styles/sharedUi";
 import { motionPreset } from "@/styles/motionPresets";
+import { getDocumentDownload } from "@/lib/workforce/documents";
 
 /**
  * The reader's own shell: hero, sticky progress bar, collapsible TOC,
@@ -29,6 +30,20 @@ export function DocumentReaderShell({ doc, onBack }: { doc: Document; onBack: ()
   const progress = useSectionProgress(sectionIds);
   useDocumentReadPersistence(doc, progress, doc.documentVersionId);
   const [tocCollapsed, setTocCollapsed] = useState(false);
+  const [downloadError, setDownloadError] = useState("");
+
+  const downloadOriginal = useCallback(async () => {
+    if (!doc.documentVersionId) return;
+    setDownloadError("");
+    try {
+      const result = await getDocumentDownload(doc.documentVersionId);
+      const url = typeof result.url === "string" ? result.url : typeof result.signed_url === "string" ? result.signed_url : null;
+      if (!url) throw new Error("A secure download URL was not returned.");
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      setDownloadError(error instanceof Error ? error.message : "Download failed.");
+    }
+  }, [doc.documentVersionId]);
 
   const scrollToId = useCallback((id: string) => {
     window.document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -52,18 +67,19 @@ export function DocumentReaderShell({ doc, onBack }: { doc: Document; onBack: ()
         >
           ← Back to Library
         </motion.button>
-        {doc.rawSourceUrl && (
-          <motion.a
-            href={doc.rawSourceUrl}
-            download
+        {doc.documentVersionId && (
+          <motion.button
+            type="button"
+            onClick={() => void downloadOriginal()}
             whileHover={{ y: -1 }}
             whileTap={{ scale: 0.985 }}
             style={S.btnGhost}
           >
             Download original
-          </motion.a>
+          </motion.button>
         )}
       </div>
+      {downloadError && <p role="alert" style={{ ...S.errorText, padding: "0 24px" }}>{downloadError}</p>}
 
       <ReaderHero doc={doc} />
 

@@ -1,6 +1,8 @@
 "use client";
 
+import { motion } from "framer-motion";
 import type { HeadingBlock } from "@/renderers/types";
+import { maskReveal } from "@/styles/motionPresets";
 
 export function renderHeading(block: HeadingBlock, index: number) {
   const isH1 = block.type === "heading";
@@ -15,7 +17,11 @@ export function renderHeading(block: HeadingBlock, index: number) {
         }}
         id={block.anchorId ?? block.id}
       >
-        <h2
+        <motion.h2
+          variants={maskReveal}
+          initial="hidden"
+          whileInView="show"
+          viewport={{ once: true, amount: 0.8 }}
           style={{
             fontFamily: "var(--font-display)",
             fontSize: "clamp(1.5rem, 3vw, var(--text-30))",
@@ -27,7 +33,7 @@ export function renderHeading(block: HeadingBlock, index: number) {
           }}
         >
           {block.content}
-        </h2>
+        </motion.h2>
         {/* Ember underline — single accent stroke, never colored text */}
         <div
           aria-hidden="true"

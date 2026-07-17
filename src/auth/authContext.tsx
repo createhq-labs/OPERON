@@ -31,6 +31,8 @@ export interface AuthState {
   status: AuthStatus;
   error?: string;
   signIn: () => Promise<void>;
+  signInWithPassword: (email: string, password: string) => Promise<void>;
+  signUp: (email: string, password: string, fullName: string) => Promise<{ requiresEmailConfirmation: boolean }>;
   signOut: () => Promise<void>;
   selectRole: (roleId: string, displayRoleName?: string) => void;
 }
@@ -40,6 +42,9 @@ export interface AuthState {
 const ROLE_KEY = "operon-selected-role";
 const ROLE_LABEL_KEY = "operon-selected-role-label";
 const AUTH_BOOTSTRAP_FALLBACK_MS = 6500;
+const LOCAL_ACCESS_ENABLED =
+  process.env.NODE_ENV === "development" &&
+  process.env.NEXT_PUBLIC_BOOTSTRAP_AUTH === "true";
 
 function readStorage(key: string): string | null {
   if (typeof window === "undefined") return null;
@@ -109,6 +114,8 @@ const AuthContext = createContext<AuthState>({
   status: "initializing",
   error: undefined,
   signIn: async () => {},
+  signInWithPassword: async () => {},
+  signUp: async () => ({ requiresEmailConfirmation: false }),
   signOut: async () => {},
   selectRole: () => {},
 });
@@ -129,9 +136,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
     const startTime = performance.now();
     const fallbackTimer = window.setTimeout(() => {
       if (!mountedRef.current) return;
-      setUser(createLocalUser(DEFAULT_ROLE_ID));
-      setStatus("authenticated");
-      setError(undefined);
+      setUser(LOCAL_ACCESS_ENABLED ? createLocalUser(DEFAULT_ROLE_ID) : null);
+      setStatus(LOCAL_ACCESS_ENABLED ? "authenticated" : "unauthenticated");
+      setError(LOCAL_ACCESS_ENABLED ? undefined : "Authentication timed out. Please sign in again.");
       setLoaded(true);
       logRuntimeWarning("Auth bootstrap fallback activated", {
         timeoutMs: AUTH_BOOTSTRAP_FALLBACK_MS,
@@ -171,8 +178,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
           : { available: false, reason: "Auth health check failed.", diagnostics };
 
       // If no real session, fall back to a persisted local role (MVP mode).
-      const localRoleId = currentUser ? null : readStorage(ROLE_KEY);
-      const localRoleLabel = currentUser ? null : readStorage(ROLE_LABEL_KEY);
+      const localRoleId = currentUser || !LOCAL_ACCESS_ENABLED ? null : readStorage(ROLE_KEY);
+      const localRoleLabel = currentUser || !LOCAL_ACCESS_ENABLED ? null : readStorage(ROLE_LABEL_KEY);
 
       const resolvedRoleId =
         localRoleId && getRoleById(localRoleId) ? localRoleId : DEFAULT_ROLE_ID;
@@ -182,8 +189,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
         writeStorage(ROLE_KEY, resolvedRoleId);
       }
 
-      const activeUser =
-        currentUser ?? createLocalUser(resolvedRoleId, localRoleLabel ?? undefined);
+      const activeUser = currentUser ?? (LOCAL_ACCESS_ENABLED
+        ? createLocalUser(resolvedRoleId, localRoleLabel ?? undefined)
+        : null);
 
       const resolvedStatus: AuthStatus = activeUser
         ? "authenticated"
@@ -226,7 +234,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       logRuntimeError("Auth bootstrap failed", { error: message });
     });
 
-    subscriptionRef.current = authAdapter.onAuthStateChange(async (event) => {
+    async function handleAuthEvent(event: string) {
       if (!mountedRef.current) return;
 
       try {
@@ -259,6 +267,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
           error: err instanceof Error ? err.message : String(err),
         });
       }
+    }
+
+    subscriptionRef.current = authAdapter.onAuthStateChange((event) => {
+      // Supabase recommends avoiding awaited client calls inside the auth
+      // callback itself. Defer profile/role resolution outside its lock.
+      window.setTimeout(() => void handleAuthEvent(event), 0);
     });
 
     return () => {
@@ -280,6 +294,18 @@ export function AuthProvider({ children }: PropsWithChildren) {
     }
   }
 
+  async function signInWithPassword(email: string, password: string) {
+    clearStorage(ROLE_KEY, ROLE_LABEL_KEY);
+    setError(undefined);
+    await authAdapter.signInWithPassword(email, password);
+  }
+
+  async function signUp(email: string, password: string, fullName: string) {
+    clearStorage(ROLE_KEY, ROLE_LABEL_KEY);
+    setError(undefined);
+    return authAdapter.signUp(email, password, fullName);
+  }
+
   async function signOut() {
     try {
       clearStorage(ROLE_KEY, ROLE_LABEL_KEY);
@@ -294,7 +320,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }
 
   function selectRole(roleId: string, displayRoleName?: string): void {
-    if (!mountedRef.current) return;
+    if (!mountedRef.current || !LOCAL_ACCESS_ENABLED) return;
 
     const role = getRoleById(roleId) ?? getRoleById(DEFAULT_ROLE_ID);
     const resolvedRoleId = role?.id ?? DEFAULT_ROLE_ID;
@@ -311,7 +337,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   return (
     <AuthContext.Provider
-      value={{ user, loaded, status, error, signIn, signOut, selectRole }}
+      value={{ user, loaded, status, error, signIn, signInWithPassword, signUp, signOut, selectRole }}
     >
       {children}
     </AuthContext.Provider>

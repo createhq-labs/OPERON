@@ -1,15 +1,26 @@
-import { motion } from "framer-motion";
+"use client";
+
+import { FileText, Pin } from "lucide-react";
+import {
+  Button,
+  EmptyState,
+  Metric,
+  MotionPage,
+  MotionSection,
+  PageHeader,
+  PageShell,
+  Section,
+  SectionHeader,
+  Surface,
+} from "@/components/ui";
 import type { Document, DriveDocumentReference, QuickActionItem, User } from "@/core/operon";
 import type { DriveDiagnostics } from "@/services/drive";
+import { motionPreset, motionTransition } from "@/styles/motionPresets";
+import { S, Sp, T } from "@/styles/sharedUi";
 
 const TAG_LABELS: Record<string, string> = {
-  sop: "SOP",
-  onboarding: "Onboarding",
-  brand: "Brand",
-  creator: "Creator",
-  ops: "Operations",
-  hr: "HR",
-  internal: "Internal",
+  sop: "SOP", onboarding: "Onboarding", brand: "Brand", creator: "Creator",
+  ops: "Operations", hr: "HR", internal: "Internal",
 };
 
 interface HomePanelProps {
@@ -24,7 +35,7 @@ interface HomePanelProps {
 }
 
 export function HomePanel({
-  user: _user,
+  user,
   providerLoading,
   driveDiagnostics: _driveDiagnostics,
   displayQuickActions,
@@ -39,263 +50,69 @@ export function HomePanel({
     .slice(0, 8);
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, ease: [0.44, 0, 0.56, 1] }}
-      style={{ display: "flex", flexDirection: "column", gap: "32px" }}
-    >
-      {/* Quick Actions */}
-      {displayQuickActions.length > 0 && (
-        <motion.section
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.05, ease: [0.44, 0, 0.56, 1] }}
-          style={{
-            background: "var(--surface)",
-            border: "1px solid var(--border)",
-            borderRadius: "var(--r-lg)",
-            padding: "24px",
-          }}
-        >
-          <h2
-            style={{
-              fontFamily: "var(--font-ui)",
-              fontSize: "var(--text-12)",
-              fontWeight: 500,
-              color: "var(--text-3)",
-              letterSpacing: "0.06em",
-              textTransform: "uppercase",
-              marginBottom: "16px",
-              margin: 0,
-            }}
-          >
-            Quick actions
-          </h2>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-              gap: "12px",
-            }}
-          >
-            {displayQuickActions.slice(0, 6).map((action, index) => (
-              <motion.button
-                key={`${action.label}-${action.id}`}
-                type="button"
-                onClick={() => onActionSelect(action)}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{
-                  duration: 0.25,
-                  delay: index * 0.03,
-                  ease: [0.44, 0, 0.56, 1],
-                }}
-                whileHover={{ y: -1 }}
-                whileTap={{ scale: 0.98 }}
-                style={{
-                  background: "var(--surface-2)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "var(--r-md)",
-                  padding: "14px 16px",
-                  textAlign: "left",
-                  cursor: "pointer",
-                  transition: "all 200ms",
-                  fontSize: "var(--text-14)",
-                  fontWeight: 500,
-                  color: "var(--text)",
-                }}
-              >
-                {action.label}
-              </motion.button>
-            ))}
-          </div>
-        </motion.section>
-      )}
+    <MotionPage {...motionPreset.page}>
+      <PageShell>
+        <PageHeader
+          eyebrow="Workspace"
+          title={`Welcome back, ${user.name.split(" ")[0]}`}
+          description="Open recent knowledge or start from a trusted workflow."
+        />
 
-      {/* Recent Documents */}
-      <motion.section
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3, delay: 0.1, ease: [0.44, 0, 0.56, 1] }}
-        style={{
-          background: "var(--surface)",
-          border: "1px solid var(--border)",
-          borderRadius: "var(--r-lg)",
-          padding: "24px",
-        }}
-      >
-        <h2
-          style={{
-            fontFamily: "var(--font-ui)",
-            fontSize: "var(--text-12)",
-            fontWeight: 500,
-            color: "var(--text-3)",
-            letterSpacing: "0.06em",
-            textTransform: "uppercase",
-            marginBottom: "16px",
-            margin: 0,
-          }}
-        >
-          Recent
-        </h2>
-        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-          {recentDocs.length > 0 ? (
-            recentDocs.map((doc, index) => (
-              <motion.button
-                key={doc.id}
-                type="button"
-                onClick={() => onShowDoc(doc.id)}
-                initial={{ opacity: 0, y: 4 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{
-                  duration: 0.25,
-                  delay: index * 0.02,
-                  ease: [0.44, 0, 0.56, 1],
-                }}
-                whileHover={{ x: 2 }}
-                whileTap={{ scale: 0.99 }}
-                style={{
-                  background: "var(--surface-2)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "var(--r-md)",
-                  padding: "12px 14px",
-                  textAlign: "left",
-                  cursor: "pointer",
-                  transition: "all 200ms",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: "12px",
-                }}
-              >
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div
-                    style={{
-                      fontFamily: "var(--font-ui)",
-                      fontSize: "var(--text-14)",
-                      fontWeight: 500,
-                      color: "var(--text)",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
+        {displayQuickActions.length > 0 && (
+          <MotionSection {...motionPreset.panel}>
+            <Section spacing="compact">
+              <SectionHeader title="Quick actions" description="Common ways to create and find operational knowledge." />
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: Sp["3"] }}>
+                {displayQuickActions.slice(0, 6).map((action) => (
+                  <Button
+                    key={`${action.label}-${action.id}`}
+                    variant="ghost"
+                    onClick={() => onActionSelect(action)}
+                    style={{ ...S.inset, minHeight: "64px", height: "auto", padding: Sp["4"], alignItems: "flex-start", flexDirection: "column", textAlign: "left" }}
                   >
-                    {doc.title}
-                  </div>
-                </div>
-                <div
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    fontSize: "var(--text-11)",
-                    color: "var(--text-3)",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {TAG_LABELS[doc.tag]}
-                </div>
-              </motion.button>
-            ))
-          ) : providerLoading ? (
-            <motion.div
-              animate={{ opacity: [0.5, 1] }}
-              transition={{ duration: 0.8, repeat: Infinity }}
-              style={{
-                fontSize: "var(--text-14)",
-                color: "var(--text-3)",
-                padding: "16px",
-                textAlign: "center",
-              }}
-            >
-              Loading…
-            </motion.div>
-          ) : (
-            <div
-              style={{
-                fontSize: "var(--text-14)",
-                color: "var(--text-3)",
-                padding: "16px",
-                textAlign: "center",
-              }}
-            >
-              No documents yet
-            </div>
-          )}
-        </div>
-      </motion.section>
+                    <span style={T.cardTitle}>{action.label}</span>
+                    {action.description && <span style={T.caption}>{action.description}</span>}
+                  </Button>
+                ))}
+              </div>
+            </Section>
+          </MotionSection>
+        )}
 
-      {/* Stats */}
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3, delay: 0.15, ease: [0.44, 0, 0.56, 1] }}
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
-          gap: "12px",
-        }}
-      >
-        <div
-          style={{
-            background: "var(--surface)",
-            border: "1px solid var(--border)",
-            borderRadius: "var(--r-lg)",
-            padding: "16px",
-            textAlign: "center",
-          }}
-        >
-          <div
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: "24px",
-              fontWeight: 400,
-              color: "var(--text)",
-              marginBottom: "4px",
-            }}
-          >
-            {accessibleDocs.length}
-          </div>
-          <div
-            style={{
-              fontFamily: "var(--font-body)",
-              fontSize: "var(--text-12)",
-              color: "var(--text-3)",
-            }}
-          >
-            Documents
-          </div>
-        </div>
-        <div
-          style={{
-            background: "var(--surface)",
-            border: "1px solid var(--border)",
-            borderRadius: "var(--r-lg)",
-            padding: "16px",
-            textAlign: "center",
-          }}
-        >
-          <div
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: "24px",
-              fontWeight: 400,
-              color: "var(--text)",
-              marginBottom: "4px",
-            }}
-          >
-            {pinnedDocs.length}
-          </div>
-          <div
-            style={{
-              fontFamily: "var(--font-body)",
-              fontSize: "var(--text-12)",
-              color: "var(--text-3)",
-            }}
-          >
-            Pinned
-          </div>
-        </div>
-      </motion.div>
-    </motion.div>
+        <MotionSection {...motionPreset.panel}>
+          <Section>
+            <SectionHeader title="Recent" description="Your latest documents, ordered by their most recent update." />
+            <Surface padding="none">
+              {recentDocs.length > 0 ? recentDocs.map((doc, index) => (
+                <Button
+                  key={doc.id}
+                  variant="ghost"
+                  onClick={() => onShowDoc(doc.id)}
+                  transition={motionTransition.control}
+                  style={{ ...S.row, width: "100%", minHeight: "54px", height: "auto", padding: `${Sp["3"]} ${Sp["4"]}`, borderRadius: 0, borderBottom: index === recentDocs.length - 1 ? "none" : "1px solid var(--op-border)", justifyContent: "space-between" }}
+                >
+                  <span style={{ ...T.cardTitle, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.title}</span>
+                  <span style={{ ...T.caption, fontFamily: "var(--font-mono)", flexShrink: 0 }}>{TAG_LABELS[doc.tag] ?? doc.tag}</span>
+                </Button>
+              )) : providerLoading ? (
+                <EmptyState title="Loading documents…" description="Syncing the latest items from your workspace." />
+              ) : (
+                <EmptyState title="No documents yet" description="Your recently updated documents will appear here." icon={FileText} />
+              )}
+            </Surface>
+          </Section>
+        </MotionSection>
+
+        <MotionSection {...motionPreset.panel}>
+          <Section spacing="compact">
+            <SectionHeader title="Workspace overview" />
+            <Surface tone="inset" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: Sp["8"] }}>
+              <Metric icon={FileText} label="Documents" value={accessibleDocs.length} />
+              <Metric icon={Pin} label="Pinned" value={pinnedDocs.length} />
+            </Surface>
+          </Section>
+        </MotionSection>
+      </PageShell>
+    </MotionPage>
   );
 }

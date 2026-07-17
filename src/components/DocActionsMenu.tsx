@@ -142,7 +142,7 @@ export function DocActionsMenu({
                 }}
               >
                 <Trash2 size={13} aria-hidden="true" />
-                Delete
+                Archive
               </button>
             )}
           </motion.div>

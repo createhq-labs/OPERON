@@ -100,7 +100,10 @@ function ChecklistRow({
   );
 }
 
-export function renderChecklist(block: ChecklistBlock, _index: number) {
+// PascalCase and rendered via JSX (not called as a plain function) so the
+// useState below is valid per React's rules of hooks — renderChecklist itself
+// stays a plain dispatcher function, this is the actual component.
+function ChecklistCard({ block }: { block: ChecklistBlock }) {
   const { title, items } = block.content;
   // Checked state is local/ephemeral UI only — it resets on reload, since
   // there's no persistence contract for "reader progress through a checklist"
@@ -185,4 +188,8 @@ export function renderChecklist(block: ChecklistBlock, _index: number) {
       </div>
     </div>
   );
+}
+
+export function renderChecklist(block: ChecklistBlock, _index: number) {
+  return <ChecklistCard block={block} />;
 }

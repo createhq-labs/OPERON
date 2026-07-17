@@ -1,6 +1,7 @@
 "use client";
 
 import { renderBlock } from "@/renderers";
+import { RevealBlocks } from "@/features/reader/RevealBlocks";
 import type { DocumentSection } from "@/features/reader/types";
 
 /** Image(s) full-bleed at the top, heading and any remaining text in a narrow column below. */
@@ -16,7 +17,7 @@ export function ImageLedSection({ section }: { section: DocumentSection }) {
       </div>
       <div style={{ maxWidth: "640px", margin: "40px auto 0", padding: "0 24px" }}>
         {section.headingBlock && renderBlock(section.headingBlock, 0)}
-        {rest.map((block, index) => renderBlock(block, index))}
+        <RevealBlocks blocks={rest} lede />
       </div>
     </section>
   );

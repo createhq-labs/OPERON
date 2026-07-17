@@ -38,14 +38,17 @@ import {
 } from "@/security/permissions";
 import { ROLE_IDS } from "@/core/roles";
 import { openFloatingLayer, subscribeFloatingLayerClose } from "@/lib/floatingLayers";
-import { S } from "@/styles/sharedUi";
+import { S, Sp, T } from "@/styles/sharedUi";
+import {
+  Button, Drawer, EmptyState, IconButton, Input, Matrix, Metric, Modal,
+  PageShell, SearchField, Section, SectionHeader, Select, Surface, Tabs,
+} from "@/components/ui";
 import { AnimatePresence, motion } from "framer-motion";
-import { motionPreset, spring } from "@/styles/motionPresets";
+import { motionPreset } from "@/styles/motionPresets";
 import { STATUS_TOKENS } from "@/styles/statusColors";
 import { EmployeeProfilePanel } from "@/features/workforce/EmployeeProfilePanel";
 import {
-  Search, Building2, Users as UsersIcon, CalendarClock, ListFilter,
-  ChevronLeft, ChevronRight, UsersRound, CheckCircle2, Home as HomeIcon,
+  CalendarClock, ChevronLeft, ChevronRight, UsersRound, CheckCircle2, Home as HomeIcon,
   CalendarOff, TrendingUp,
 } from "lucide-react";
 
@@ -389,48 +392,37 @@ export default function AttendancePage() {
   // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+    <PageShell>
 
-      <div className="calendar-layout" style={{ display: "grid", gridTemplateColumns: "1fr 268px", gap: "16px", alignItems: "start" }}>
+      <div className="calendar-layout" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 268px", gap: Sp["8"], alignItems: "start" }}>
 
         {/* ── Left: main content ── */}
-        <div style={{ ...S.card, padding: "18px", overflow: "visible" }}>
+        <Section spacing="compact" style={{ minWidth: 0 }}>
 
           {/* Header */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap", marginBottom: "16px" }}>
-            <div>
-              <h2 style={S.sectionTitle}>{headerTitle}</h2>
-              <p style={{ ...S.sectionDesc, marginTop: "2px", fontSize: "var(--text-12)" }}>{headerDesc}</p>
-            </div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+          <SectionHeader title={headerTitle} description={headerDesc} actions={
+            <div style={{ display: "flex", alignItems: "center", gap: Sp["2"], flexWrap: "wrap" }}>
               {/* View toggle */}
               {tabs.length > 0 && (
-                <div style={{ display: "flex", gap: "3px", padding: "3px", borderRadius: "var(--r-full)", border: "1px solid var(--op-border)", background: "var(--op-surface-2)" }}>
-                  {tabs.map((tab) => (
-                    <button key={tab.id} type="button" onClick={() => setViewMode(tab.id)} style={tabBtn(viewMode === tab.id)}>
-                      {tab.label}
-                    </button>
-                  ))}
-                </div>
+                <Tabs<ViewMode> items={tabs.map((tab) => ({ value: tab.id as ViewMode, label: tab.label }))} value={viewMode} onChange={setViewMode} label="Attendance view" />
               )}
               {/* Month nav — org view keeps its own inside the floating toolbar */}
               {viewMode !== "org" && (
                 <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-                  <button type="button" style={navBtnStyle} onClick={() => setMonth(addMonths(month, -1))} aria-label="Previous">&lt;</button>
-                  <span style={monthLabelStyle}>{monthLabel(month)}</span>
-                  <button type="button" style={navBtnStyle} onClick={() => setMonth(addMonths(month, 1))} aria-label="Next">&gt;</button>
+                  <IconButton label="Previous month" onClick={() => setMonth(addMonths(month, -1))}><ChevronLeft size={14} /></IconButton>
+                  <span style={{ ...T.cardTitle, minWidth: "150px", textAlign: "center" }}>{monthLabel(month)}</span>
+                  <IconButton label="Next month" onClick={() => setMonth(addMonths(month, 1))}><ChevronRight size={14} /></IconButton>
                 </div>
               )}
             </div>
-          </div>
+          } />
 
           {/* Feedback */}
           {message && (
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 12px", borderRadius: "var(--r-md)", background: "rgba(255,255,255,0.04)", border: "1px solid var(--op-border)", marginBottom: "14px" }}>
+            <Surface tone="inset" padding="compact" style={{ display: "flex", alignItems: "center", gap: Sp["2"] }}>
               <span style={{ width: "5px", height: "5px", borderRadius: "50%", background: "var(--op-accent)", flexShrink: 0 }} />
-              <p style={{ fontFamily: "var(--font-body)", fontSize: "var(--text-12)", color: "var(--op-text-3)", margin: 0 }}>{message}</p>
-            </div>
+              <p style={T.bodySmall}>{message}</p>
+            </Surface>
           )}
 
           {/* ── Views ─────────────────────────────────────────────────────── */}
@@ -499,7 +491,7 @@ export default function AttendancePage() {
               <SummaryPanel summary={summary} />
             </div>
           )}
-        </div>
+        </Section>
 
         {/* ── Right: holiday panel ── */}
         <HolidayPanel
@@ -512,7 +504,7 @@ export default function AttendancePage() {
 
       {/* ── Approval queue ── */}
       {approvalQueue.length > 0 && (
-        <details style={{ ...S.card, padding: "12px 14px" }} open>
+        <details style={{ ...S.group, padding: Sp["4"] }} open>
           <summary style={{ fontFamily: "var(--font-ui)", fontSize: "var(--text-13)", color: "var(--op-text)", cursor: "pointer", fontWeight: 700 }}>
             Leave &amp; WFH Approvals
             <span style={{ marginLeft: "8px", color: "var(--op-accent)", fontWeight: 700 }}>{approvalQueue.length}</span>
@@ -532,7 +524,7 @@ export default function AttendancePage() {
                 canActAsHr ? "Pending HR approval" :
                 "Pending manager approval";
               return (
-                <div key={req.id} style={{ ...S.cardInner, border: "1px solid var(--op-border)", padding: "10px 14px", display: "flex", flexDirection: "column", gap: "8px" }}>
+                <div key={req.id} style={{ ...S.row, padding: `${Sp["3"]} ${Sp["4"]}`, display: "flex", flexDirection: "column", alignItems: "stretch", gap: Sp["2"] }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                       <span style={{ fontFamily: "var(--font-ui)", fontSize: "var(--text-13)", fontWeight: 700, color: "var(--op-text)" }}>{requester?.name ?? req.userId}</span>
@@ -571,8 +563,7 @@ export default function AttendancePage() {
       )}
 
       {/* ── Add Holiday Modal ── */}
-      <AnimatePresence>
-        {showAddHoliday && (
+      {showAddHoliday && (
           <AddHolidayModal
             holidayDate={holidayDate}
             holidayName={holidayName}
@@ -583,40 +574,12 @@ export default function AttendancePage() {
             onSubmit={handleAddHoliday}
             onClose={() => setShowAddHoliday(false)}
           />
-        )}
-      </AnimatePresence>
+      )}
 
       {/* ── Employee slide-over — overlays the org matrix instead of replacing it ── */}
-      <AnimatePresence>
-        {viewMode === "org" && drilldownUser && user && (
-          <>
-            <motion.div
-              key="employee-slideover-backdrop"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setDrilldownUser(null)}
-              style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", backdropFilter: "blur(2px)", zIndex: Z.slideOverBackdrop }}
-            />
-            <motion.div
-              key="employee-slideover-panel"
-              initial={{ opacity: 0, x: 40, scale: 0.98 }}
-              animate={{ opacity: 1, x: 0, scale: 1 }}
-              exit={{ opacity: 0, x: 40, scale: 0.98 }}
-              transition={spring.soft}
-              style={{
-                position: "fixed", top: 0, right: 0, height: "100vh",
-                width: "min(560px, 100vw)", zIndex: Z.slideOver,
-                overflowY: "auto", padding: "16px",
-                background: "var(--op-sidebar-bg)", borderLeft: "1px solid var(--op-border-hover)",
-                boxShadow: "var(--shadow-xl)",
-              }}
-            >
-              <EmployeeProfilePanel person={drilldownUser} actor={user} onClose={() => setDrilldownUser(null)} editable />
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+      <Drawer open={viewMode === "org" && Boolean(drilldownUser && user)} title="Employee details" onClose={() => setDrilldownUser(null)}>
+        {drilldownUser && user && <EmployeeProfilePanel person={drilldownUser} actor={user} onClose={() => setDrilldownUser(null)} editable />}
+      </Drawer>
 
       <style>{`
         @media (max-width: 900px) {
@@ -643,7 +606,7 @@ export default function AttendancePage() {
           filter: brightness(1.18);
         }
       `}</style>
-    </div>
+    </PageShell>
   );
 }
 
@@ -718,10 +681,9 @@ function AttendanceMatrix({
 
       {/* Floating toolbar (HR only) */}
       {showFilters && (
-        <div
+        <Surface
+          padding="compact"
           style={{
-            ...S.card,
-            padding: "10px 12px",
             display: "flex",
             gap: "8px",
             flexWrap: "wrap",
@@ -730,61 +692,50 @@ function AttendanceMatrix({
             zIndex: Z.toolbar,
           }}
         >
-          <div style={{ position: "relative", flex: "1 1 180px", minWidth: "160px" }}>
-            <Search size={14} color="var(--op-text-3)" style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)" }} />
-            <input
-              style={{ ...S.input, height: "36px", padding: "0 12px 0 34px", fontSize: "var(--text-13)" }}
+          <SearchField
+              style={{ flex: "1 1 180px", minWidth: "160px" }}
               value={searchQuery}
               onChange={(e) => onSearchChange?.(e.target.value)}
               placeholder="Search employee…"
             />
-          </div>
-          <FilterSelect icon={Building2} value={deptFilter} onChange={(v) => onDeptFilterChange?.(v)}>
+          <Select style={{ minWidth: "150px", height: "38px" }} value={deptFilter} onChange={(e) => onDeptFilterChange?.(e.target.value)} aria-label="Department">
             <option value="all">All Departments</option>
             {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-          </FilterSelect>
-          <FilterSelect icon={UsersIcon} value={managerFilter} onChange={(v) => onManagerFilterChange?.(v)}>
+          </Select>
+          <Select style={{ minWidth: "150px", height: "38px" }} value={managerFilter} onChange={(e) => onManagerFilterChange?.(e.target.value)} aria-label="Manager">
             <option value="all">All Managers</option>
             {managers.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-          </FilterSelect>
-          <FilterSelect icon={ListFilter} value={statusFilter} onChange={(v) => onStatusFilterChange?.(v as AttendanceDayStatus | "all")}>
+          </Select>
+          <Select style={{ minWidth: "140px", height: "38px" }} value={statusFilter} onChange={(e) => onStatusFilterChange?.(e.target.value as AttendanceDayStatus | "all")} aria-label="Attendance status">
             <option value="all">All Statuses</option>
             <option value="present">Present Today</option>
             <option value="wfh">WFH Today</option>
             <option value="leave">Leave Today</option>
-          </FilterSelect>
+          </Select>
           {monthLabelText && (
             <div style={{ display: "flex", alignItems: "center", gap: "4px", marginLeft: "auto", paddingLeft: "8px", borderLeft: "1px solid var(--op-border)" }}>
               <CalendarClock size={14} color="var(--op-text-3)" />
-              <button type="button" style={navBtnStyle} onClick={onPrevMonth} aria-label="Previous month"><ChevronLeft size={14} /></button>
-              <span style={monthLabelStyle}>{monthLabelText}</span>
-              <button type="button" style={navBtnStyle} onClick={onNextMonth} aria-label="Next month"><ChevronRight size={14} /></button>
+              <IconButton label="Previous month" onClick={onPrevMonth}><ChevronLeft size={14} /></IconButton>
+              <span style={{ ...T.cardTitle, minWidth: "150px", textAlign: "center" }}>{monthLabelText}</span>
+              <IconButton label="Next month" onClick={onNextMonth}><ChevronRight size={14} /></IconButton>
             </div>
           )}
-        </div>
+        </Surface>
       )}
 
       {/* Spreadsheet matrix */}
-      <div
+      <Matrix label="Employee attendance by date"
         style={{
-          overflowX:    "auto",
-          overflowY:    "auto",
           maxHeight:    "58vh",
           minHeight:    "120px",
-          borderRadius: "var(--r-lg)",
-          border:       "1px solid var(--op-border)",
         }}
       >
         {filtered.length === 0 ? (
-          <div style={{ ...S.emptyState, borderRadius: 0, border: "none" }}>
-            <div style={S.emptyIcon}><UsersRound size={18} /></div>
-            <div style={S.emptyTitle}>No employees match your filters</div>
-            <div style={S.emptyDesc}>Try adjusting search, department, manager, or status.</div>
-          </div>
+          <EmptyState icon={UsersRound} title="No employees match your filters" description="Try adjusting search, department, manager, or status." />
         ) : (
           <>
             {/* ── Header row (sticky top) ── */}
-            <div style={{ display: "flex", position: "sticky", top: 0, zIndex: Z.stickyRow, background: stickyBg, borderBottom: "1px solid var(--op-border)", boxShadow: "0 4px 12px rgba(0,0,0,0.28)" }}>
+            <div style={{ display: "flex", position: "sticky", top: 0, zIndex: Z.stickyRow, background: stickyBg, borderBottom: "1px solid var(--op-border)" }}>
               {/* Corner cell — sticky top + left */}
               <div style={{ width: NAME_COL, flexShrink: 0, position: "sticky", left: 0, zIndex: Z.stickyCorner, background: stickyBg, padding: "8px 12px", display: "flex", alignItems: "flex-end" }}>
                 <span style={{ fontFamily: "var(--font-ui)", fontSize: "var(--text-10)", fontWeight: 700, color: "var(--op-text-3)", letterSpacing: "0.06em", textTransform: "uppercase" }}>
@@ -951,7 +902,7 @@ function AttendanceMatrix({
             })}
           </>
         )}
-      </div>
+      </Matrix>
 
       {/* Legend */}
       <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", paddingLeft: "2px" }}>
@@ -976,28 +927,6 @@ function AttendanceMatrix({
   );
 }
 
-function FilterSelect({
-  icon: Icon, value, onChange, children,
-}: {
-  icon: typeof Search;
-  value: string;
-  onChange: (v: string) => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <div style={{ position: "relative", flex: "0 1 160px", minWidth: "140px" }}>
-      <Icon size={14} color="var(--op-text-3)" style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
-      <select
-        style={{ ...S.select, width: "100%", height: "36px", padding: "0 10px 0 34px", fontSize: "var(--text-13)" }}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        {children}
-      </select>
-    </div>
-  );
-}
-
 // ─── Holiday Panel (compact) ──────────────────────────────────────────────────
 
 function HolidayPanel({
@@ -1017,10 +946,8 @@ function HolidayPanel({
   const past     = sorted.filter((h) => h.date < todayIso);
 
   return (
-    <div style={{ ...S.card, padding: "16px", display: "flex", flexDirection: "column", gap: "14px" }}>
-      <div style={{ fontFamily: "var(--font-ui)", fontSize: "var(--text-13)", fontWeight: 700, color: "var(--op-text)" }}>
-        Holidays
-      </div>
+    <Surface style={{ display: "flex", flexDirection: "column", gap: Sp["4"] }}>
+      <SectionHeader title="Holidays" />
 
       {/* Upcoming list */}
       <div style={{ display: "flex", flexDirection: "column" }}>
@@ -1063,12 +990,12 @@ function HolidayPanel({
 
       {/* Add Holiday button */}
       {canEdit && (
-        <button type="button" onClick={onOpenAddModal} style={{ ...S.btnGhost, width: "100%", justifyContent: "center", gap: "6px", height: "34px", borderStyle: "dashed" }}>
+        <Button variant="secondary" onClick={onOpenAddModal} style={{ width: "100%" }}>
           <span style={{ fontSize: "16px", lineHeight: 1 }}>+</span>
           Add Holiday
-        </button>
+        </Button>
       )}
-    </div>
+    </Surface>
   );
 }
 
@@ -1089,45 +1016,20 @@ function AddHolidayModal({
   onClose: () => void;
 }) {
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      style={{ ...S.modalOverlay, zIndex: Z.modal }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-    >
-      <motion.div
-        initial={{ opacity: 0, scale: 0.96, y: -8 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.96, y: -8 }}
-        transition={spring.snappy}
-        style={{ ...S.modalPanel, width: "360px" }}
-      >
-        <div style={S.modalHeader}>Add Holiday</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-          <div>
-            <label style={S.label}>Date</label>
-            <input type="date" style={S.input} value={holidayDate} onChange={(e) => onDateChange(e.target.value)} />
-          </div>
-          <div>
-            <label style={S.label}>Name</label>
-            <input style={S.input} value={holidayName} onChange={(e) => onNameChange(e.target.value)} placeholder="e.g. Independence Day" autoFocus />
-          </div>
-          <div>
-            <label style={S.label}>Type</label>
-            <select style={S.select} value={holidayType} onChange={(e) => onTypeChange(e.target.value as HolidayType)}>
+    <Modal open title="Add Holiday" onClose={onClose} width={400} footer={<>
+      <Button variant="secondary" onClick={onClose}>Cancel</Button>
+      <Button variant="primary" onClick={onSubmit}>Add Holiday</Button>
+    </>}>
+        <div style={{ display: "flex", flexDirection: "column", gap: Sp["4"] }}>
+          <Input label="Date" type="date" value={holidayDate} onChange={(e) => onDateChange(e.target.value)} />
+          <Input label="Name" value={holidayName} onChange={(e) => onNameChange(e.target.value)} placeholder="e.g. Independence Day" autoFocus />
+          <Select label="Type" value={holidayType} onChange={(e) => onTypeChange(e.target.value as HolidayType)}>
               <option value="public">Public</option>
               <option value="optional">Optional</option>
               <option value="company">Company</option>
-            </select>
-          </div>
+          </Select>
         </div>
-        <div style={S.modalFooter}>
-          <button type="button" style={{ ...S.btnPrimary, flex: 1, justifyContent: "center" }} onClick={onSubmit}>Add Holiday</button>
-          <button type="button" style={{ ...S.btnGhost, flex: 1, justifyContent: "center" }} onClick={onClose}>Cancel</button>
-        </div>
-      </motion.div>
-    </motion.div>
+    </Modal>
   );
 }
 
@@ -1430,44 +1332,12 @@ function OrgSummaryCards({
   ];
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: "8px" }}>
+    <Surface tone="inset" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: Sp["6"] }}>
       {tiles.map(({ icon: Icon, label, value, fg }) => (
-        <div key={label} className="op-lift" style={{ ...S.cardInner, border: "1px solid var(--op-border)", padding: "10px 12px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-            <Icon size={12} color={fg ?? "var(--op-text-3)"} />
-            <span style={{ fontFamily: "var(--font-ui)", fontSize: "10px", fontWeight: 700, color: "var(--op-text-3)", letterSpacing: "0.05em", textTransform: "uppercase" }}>{label}</span>
-          </div>
-          <div style={{ fontFamily: "var(--font-display)", fontSize: "var(--text-20)", fontWeight: 300, color: fg ?? "var(--op-text)", marginTop: "4px" }}>{value}</div>
-        </div>
+        <Metric key={label} icon={Icon} label={label} value={value} color={fg} />
       ))}
-    </div>
+    </Surface>
   );
 }
 
 // ─── Style helpers ────────────────────────────────────────────────────────────
-
-function tabBtn(active: boolean): CSSProperties {
-  return {
-    height: "28px", padding: "0 12px",
-    borderRadius: "var(--r-full)",
-    background: active ? "rgba(255,255,255,0.1)" : "transparent",
-    color: active ? "var(--op-text)" : "var(--op-text-3)",
-    fontFamily: "var(--font-ui)", fontSize: "var(--text-12)", fontWeight: 700,
-    cursor: "pointer", border: "none",
-  };
-}
-
-const monthLabelStyle: CSSProperties = {
-  fontFamily: "var(--font-ui)", fontSize: "var(--text-13)", fontWeight: 700,
-  color: "var(--op-text)", minWidth: "150px", textAlign: "center", letterSpacing: "-0.01em",
-};
-
-const navBtnStyle: CSSProperties = {
-  width: "30px", height: "30px",
-  borderRadius: "var(--r-full)",
-  border: "1px solid var(--op-border)",
-  background: "var(--op-surface-2)",
-  color: "var(--op-text)",
-  fontFamily: "var(--font-ui)", fontSize: "16px",
-  cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-};

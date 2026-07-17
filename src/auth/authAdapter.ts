@@ -33,6 +33,8 @@ export interface AuthAdapter {
   getSession(): Promise<AuthSession | null>;
   getCurrentUser(): Promise<User | null>;
   signIn(): Promise<void>;
+  signInWithPassword(email: string, password: string): Promise<void>;
+  signUp(email: string, password: string, fullName: string): Promise<{ requiresEmailConfirmation: boolean }>;
   signOut(): Promise<void>;
   onAuthStateChange(
     callback: (event: string, session: unknown) => void
@@ -56,6 +58,18 @@ function coerceStringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? (value as unknown[]).filter((v): v is string => typeof v === "string")
     : [];
+}
+
+function appRoleFromGlobalRole(value: unknown): string {
+  const role = Array.isArray(value) ? value[0] : value;
+  const name = typeof role === "object" && role !== null
+    ? coerceString((role as Record<string, unknown>).name).toLowerCase()
+    : "";
+  if (name === "co-founder" || name === "hr manager") return "admin";
+  if (name.includes("team lead") || name === "category lead") return "team_lead";
+  if (name.includes("finance")) return "finance";
+  if (name.includes("developer")) return "developer";
+  return DEFAULT_ROLE_ID;
 }
 
 // ─── Supabase Auth Adapter ────────────────────────────────────────────────────
@@ -97,6 +111,10 @@ export class SupabaseAuthAdapter implements AuthAdapter {
    * passes RBAC checks with elevated privileges.
    */
   private mapSupabaseUser(row: Record<string, unknown>): User {
+    const role = Array.isArray(row.role) ? row.role[0] : row.role;
+    const roleName = typeof role === "object" && role !== null
+      ? coerceString((role as Record<string, unknown>).name)
+      : "";
     return {
       id: coerceString(row.id),
       name:
@@ -104,15 +122,17 @@ export class SupabaseAuthAdapter implements AuthAdapter {
         normalizeEmail(row.email as string | undefined),
       email: normalizeEmail(row.email as string | undefined),
       avatar: "",
-      userType: coerceString(row.user_type, "employee") as UserType,
-      roleId: coerceString(row.role) || DEFAULT_ROLE_ID,
-      departmentId: (coerceString(row.business_line) || undefined) as DeptId | undefined,
-      teamId: coerceString(row.team_name) || undefined,
-      supervisorId: coerceString(row.team_lead_id) || undefined,
+      userType: roleName.trim().toLowerCase() === "creator" ? "creator" : "employee" as UserType,
+      roleId: appRoleFromGlobalRole(row.role),
+      roleName,
+      departmentId: (coerceString(row.department_id) || undefined) as DeptId | undefined,
+      teamId: coerceString(row.department_id) || undefined,
+      supervisorId: coerceString(row.manager_user_id) || undefined,
+      designationId: coerceString(row.designation_id) || undefined,
       permissionIds: coerceStringArray(row.permission_ids) as PermissionId[],
       createdById: coerceString(row.created_by),
       status: coerceString(row.status, "active") as UserStatus,
-      dateJoined: coerceString(row.date_joined) || undefined,
+      dateJoined: coerceString(row.joined_at) || undefined,
     };
   }
 
@@ -126,7 +146,7 @@ export class SupabaseAuthAdapter implements AuthAdapter {
     if (!isSupabaseConfigured()) return null;
 
     try {
-      let query = supabase.from("users").select("*").eq("status", "active");
+      let query = supabase.schema("global").from("users").select("*, role:roles(name)").eq("status", "active");
 
       if (BOOTSTRAP_AUTH_EMAIL) {
         query = query.eq("email", normalizeEmail(BOOTSTRAP_AUTH_EMAIL));
@@ -166,9 +186,10 @@ export class SupabaseAuthAdapter implements AuthAdapter {
         // 1. Look up existing profile by auth user ID.
         const { data: existing, error: selectError } = await withTimeout(
           supabase
+            .schema("global")
             .from("users")
-            .select("*")
-            .eq("auth_user_id", session.userId)
+            .select("*, role:roles(name)")
+            .eq("id", session.userId)
             .single(),
           AUTH_TIMEOUT_MS,
           { data: null, error: { code: "AUTH_TIMEOUT", message: "User profile lookup timed out." } } as never,
@@ -186,32 +207,12 @@ export class SupabaseAuthAdapter implements AuthAdapter {
           return this.mapSupabaseUser(existing as Record<string, unknown>);
         }
 
-        // 2. First login: create a default employee profile.
-        const { data: created, error: insertError } = await withTimeout(
-          supabase
-            .from("users")
-            .insert({
-              auth_user_id: session.userId,
-              email: session.email,
-              full_name: session.email,
-              user_type: "employee",
-              role: DEFAULT_ROLE_ID,
-              status: "active",
-            })
-            .select("*")
-            .single(),
-          AUTH_TIMEOUT_MS,
-          { data: null, error: { message: "User profile creation timed out." } } as never,
-        );
-
-        if (insertError) {
-          logRuntimeWarning("Failed to create user profile", {
-            error: insertError,
-          });
-          return null;
-        }
-
-        return this.mapSupabaseUser(created as Record<string, unknown>);
+        // Profile provisioning belongs to the global identity system. The
+        // browser must never create an identity/RBAC row itself.
+        logRuntimeWarning("Authenticated account is awaiting global.users provisioning", {
+          userId: session.userId,
+        });
+        return null;
       }
 
       // 3. No real session — fall back to bootstrap mode (dev only).
@@ -250,6 +251,26 @@ export class SupabaseAuthAdapter implements AuthAdapter {
     if (error) {
       throw new Error(`Sign-in failed: ${error.message}`);
     }
+  }
+
+  async signInWithPassword(email: string, password: string): Promise<void> {
+    if (!isSupabaseConfigured()) throw new Error("Supabase is not configured.");
+    const { error } = await supabase.auth.signInWithPassword({
+      email: normalizeEmail(email),
+      password,
+    });
+    if (error) throw new Error(error.message);
+  }
+
+  async signUp(email: string, password: string, fullName: string): Promise<{ requiresEmailConfirmation: boolean }> {
+    if (!isSupabaseConfigured()) throw new Error("Supabase is not configured.");
+    const { data, error } = await supabase.auth.signUp({
+      email: normalizeEmail(email),
+      password,
+      options: { data: { full_name: fullName.trim() } },
+    });
+    if (error) throw new Error(error.message);
+    return { requiresEmailConfirmation: !data.session };
   }
 
   async signOut(): Promise<void> {

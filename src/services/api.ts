@@ -224,29 +224,16 @@ function mapUserRow(row: Record<string, unknown>): User {
     name:          (row.full_name as string | null) || (row.email as string) || "",
     email:         row.email as string,
     avatar:        "",
-    userType:      ((row.user_type as UserType | null) ?? "employee"),
-    roleId:        (row.role as string | null) ?? DEFAULT_ROLE_ID,
-    departmentId:  (row.business_line as string | null) ?? undefined,
-    teamId:        (row.team_name as string | null) ?? undefined,
-    supervisorId:  (row.team_lead_id as string | null) ?? undefined,
+    userType:      "employee",
+    roleId:        (row.role_id as string | null) ?? DEFAULT_ROLE_ID,
+    departmentId:  (row.department_id as string | null) ?? undefined,
+    teamId:        (row.department_id as string | null) ?? undefined,
+    supervisorId:  (row.manager_user_id as string | null) ?? undefined,
+    designationId: (row.designation_id as string | null) ?? undefined,
     permissionIds: [],
-    createdById:   (row.created_by as string | null) ?? "",
+    createdById:   "",
     status:        (row.status as UserStatus | null) ?? "active",
-    dateJoined:    (row.date_joined as string | null) ?? undefined,
-  };
-}
-
-function toUserRow(user: User) {
-  return {
-    full_name:     user.name,
-    email:         user.email,
-    role:          user.roleId,
-    team_name:     user.teamId ?? null,
-    status:        user.status,
-    team_lead_id:  user.supervisorId ?? null,
-    business_line: user.departmentId ?? null,
-    user_type:     user.userType,
-    date_joined:   user.dateJoined ?? null,
+    dateJoined:    (row.joined_at as string | null) ?? undefined,
   };
 }
 
@@ -397,7 +384,7 @@ async function checkSupabaseConnectivity() {
     type ConnResult = { data: { id: string }[] | null; error: { message: string } | null };
     const connFallback: ConnResult = { data: [], error: { message: "Supabase connectivity check timed out." } };
     const result = await withTimeout(
-      supabase.from("users").select("id").limit(1) as unknown as Promise<ConnResult>,
+      supabase.schema("global").from("users").select("id").limit(1) as unknown as Promise<ConnResult>,
       DATA_HYDRATION_TIMEOUT_MS,
       connFallback
     );
@@ -415,7 +402,7 @@ async function reconcileSupabaseData() {
 
   try {
     await Promise.all([
-      supabase.from("users").upsert(userStore.map(toUserRow), { onConflict: "id" }),
+      Promise.resolve({ data: null, error: null }),
     ]);
   } catch (error) {
     console.warn("Supabase reconciliation failed", error);
@@ -920,7 +907,7 @@ async function hydrateSupabaseCache() {
     type RowResult = { data: Record<string, unknown>[] | null; error: { message: string } | null };
     const fallback: RowResult = { data: [], error: { message: errMessage } };
     return withTimeout(
-      supabase.from(table).select("*").limit(1000) as unknown as Promise<RowResult>,
+      supabase.schema("global").from(table).select("*").limit(1000) as unknown as Promise<RowResult>,
       DATA_HYDRATION_TIMEOUT_MS,
       fallback
     );
@@ -934,14 +921,14 @@ async function hydrateSupabaseCache() {
     // stay on local mock data unconditionally (see the store-init block above).
     const [usersRes, hrOnboardingRes, hrLeaveRes, hrAttendanceRes, hrHolidaysRes, hrProbationRes, hrManagerHistoryRes, hrDeboardingRes, notificationsRes] = await Promise.all([
       timedFetch("users", "Supabase users fetch timed out."),
-      safeFetchSupabaseTable("hr_onboarding"),
-      safeFetchSupabaseTable("hr_leave_requests"),
-      safeFetchSupabaseTable("hr_attendance"),
-      safeFetchSupabaseTable("hr_holidays"),
-      safeFetchSupabaseTable("hr_probation"),
-      safeFetchSupabaseTable("hr_manager_history"),
-      safeFetchSupabaseTable("hr_deboarding"),
-      safeFetchSupabaseTable("hr_notifications"),
+      Promise.resolve(null),
+      Promise.resolve(null),
+      Promise.resolve(null),
+      Promise.resolve(null),
+      Promise.resolve(null),
+      Promise.resolve(null),
+      Promise.resolve(null),
+      Promise.resolve(null),
     ]);
 
     if (usersRes.error) {
@@ -1519,7 +1506,7 @@ export function saveNotification(notification: Notification) {
   }
 
   if (isSupabaseAvailable()) {
-    void safeSupabaseWrite(() => supabase.from("notifications").upsert(toNotificationRow(notification), { onConflict: "legacy_id" }));
+    // Legacy notification mirroring disabled; use workforce notification RPCs.
   }
   notifyDataChange();
   return existing || notification;
@@ -1820,7 +1807,7 @@ export function saveUser(user: User) {
   }
 
   if (isSupabaseAvailable()) {
-    void safeSupabaseWrite(() => supabase.from("users").upsert({ ...createUpsertPayload(user), date_joined: user.dateJoined ?? null }, { onConflict: "legacy_id" }));
+    // Identity writes are owned by global administration, never browser clients.
   }
   notifyDataChange();
   return existing || user;
@@ -1832,7 +1819,7 @@ export function deleteResource(resourceId: string) {
   resourceStore.splice(index, 1);
 
   if (isSupabaseAvailable()) {
-    void safeSupabaseWrite(() => supabase.from("resources").delete().eq("legacy_id", resourceId));
+    // Hard deletion is intentionally disabled; archive through workforce.archive_resource.
   }
   notifyDataChange();
   return true;

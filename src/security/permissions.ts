@@ -11,19 +11,24 @@ import {
   WORKFORCE_ADMIN_ROLES,
 } from "@/security/rolePolicies";
 import { ROLE_IDS } from "@/core/roles";
+import { capabilitiesFor } from "@/lib/workforce/capabilities";
+
+function workforceCapabilities(user: User) {
+  return capabilitiesFor({ id: user.id, roleName: user.roleName ?? user.roleId, managerUserId: user.supervisorId });
+}
 
 // ─── Document Permissions ─────────────────────────────────────────────────────
 
 export function canEditDocument(user: User | null | undefined): boolean {
-  return Boolean(user && hasPermission(user, "edit_documents"));
+  return Boolean(user && workforceCapabilities(user).canManageContent);
 }
 
 export function canDeleteDocument(user: User | null | undefined): boolean {
-  return Boolean(user && hasPermission(user, "delete_documents"));
+  return false;
 }
 
 export function canUploadDocument(user: User | null | undefined): boolean {
-  return Boolean(user && hasPermission(user, "manage_uploads"));
+  return Boolean(user && workforceCapabilities(user).canManageContent);
 }
 
 // ─── Resource Permissions ─────────────────────────────────────────────────────
@@ -35,10 +40,7 @@ export function canUploadDocument(user: User | null | undefined): boolean {
  */
 export function canManageResources(user: User | null | undefined): boolean {
   if (!user) return false;
-  return (
-    hasPermission(user, "manage_resources") ||
-    RESOURCE_MANAGER_ROLES.has(user.roleId as never)
-  );
+  return workforceCapabilities(user).canManageContent;
 }
 
 export function canViewResources(user: User | null | undefined): boolean {
@@ -128,11 +130,7 @@ export function canApproveLeaveAsFounder(user: User | null | undefined): boolean
 
 export function canManageHrCalendar(user: User | null | undefined): boolean {
   if (!user) return false;
-  return (
-    hasPermission(user, "manage_hr_calendar") ||
-    HR_ONLY_ROLES.has(user.roleId as never) ||
-    FOUNDER_TIER_ROLES.has(user.roleId as never)
-  );
+  return workforceCapabilities(user).canManageAttendance;
 }
 
 /** Whether the user can view HR records (onboarding/leave/attendance) for everyone, not just themselves. */
@@ -148,13 +146,13 @@ export function canViewAllHrRecords(user: User | null | undefined): boolean {
 /** HR submits a probation review for Co-Founder/Admin to decide — submission only, no outcome authority. */
 export function canSubmitProbationReview(user: User | null | undefined): boolean {
   if (!user) return false;
-  return hasPermission(user, "submit_probation_review") || HR_ONLY_ROLES.has(user.roleId as never);
+  return workforceCapabilities(user).canManageProbation;
 }
 
 /** Only Co-Founder/Admin decide probation outcomes — deliberately excludes HR. */
 export function canDecideProbationReview(user: User | null | undefined): boolean {
   if (!user) return false;
-  return hasPermission(user, "decide_probation_review") || FOUNDER_TIER_ROLES.has(user.roleId as never);
+  return workforceCapabilities(user).canFinalizeProbation;
 }
 
 export function canAcknowledgeDeboarding(user: User | null | undefined): boolean {
@@ -226,7 +224,7 @@ export function canManageOnboarding(user: User | null | undefined): boolean {
  */
 export function canAccessPeopleModule(user: User | null | undefined): boolean {
   if (!user) return false;
-  return WORKFORCE_ADMIN_ROLES.has(user.roleId as never);
+  return workforceCapabilities(user).canManageEmployment;
 }
 
 /**
@@ -236,7 +234,7 @@ export function canAccessPeopleModule(user: User | null | undefined): boolean {
  */
 export function canSubmitCreatorDeboarding(user: User | null | undefined): boolean {
   if (!user) return false;
-  return FOUNDER_TIER_ROLES.has(user.roleId as never);
+  return workforceCapabilities(user).canInitiateCreatorDeboarding;
 }
 
 /**
@@ -247,16 +245,13 @@ export function canSubmitCreatorDeboarding(user: User | null | undefined): boole
  */
 export function canApproveCreatorDeboarding(user: User | null | undefined): boolean {
   if (!user) return false;
-  return (
-    user.roleId === ROLE_IDS.TEAM_LEAD ||
-    FOUNDER_TIER_ROLES.has(user.roleId as never)
-  );
+  return workforceCapabilities(user).canApproveCreatorDeboarding;
 }
 
 /** HR (and Founders) initiate and complete employee deboarding. */
 export function canInitiateEmployeeDeboarding(user: User | null | undefined): boolean {
   if (!user) return false;
-  return HR_ONLY_ROLES.has(user.roleId as never) || FOUNDER_TIER_ROLES.has(user.roleId as never);
+  return workforceCapabilities(user).canInitiateEmployeeDeboarding;
 }
 
 // ─── Workforce Access ─────────────────────────────────────────────────────────
@@ -268,7 +263,7 @@ export function canInitiateEmployeeDeboarding(user: User | null | undefined): bo
  */
 export function canAccessWorkforce(user: User | null | undefined): boolean {
   if (!user) return false;
-  return user.userType !== "creator";
+  return !workforceCapabilities(user).isCreator;
 }
 
 /**
@@ -277,7 +272,7 @@ export function canAccessWorkforce(user: User | null | undefined): boolean {
  */
 export function canAccessLifecycle(user: User | null | undefined): boolean {
   if (!user) return false;
-  return WORKFORCE_ADMIN_ROLES.has(user.roleId as never);
+  return workforceCapabilities(user).canManageEmployment;
 }
 
 // ─── Visibility Access ────────────────────────────────────────────────────────

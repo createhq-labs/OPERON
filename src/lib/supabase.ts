@@ -4,7 +4,6 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
  
 const rawSupabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ?? "";
 const rawSupabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ?? "";
-const rawSupabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ?? "";
  
 // ─── URL Validation ───────────────────────────────────────────────────────────
  
@@ -69,6 +68,8 @@ function createSafeSupabaseClient(): SupabaseClient {
     auth: {
       getSession: async () => ({ data: { session: null }, error: null }),
       signInWithOAuth: async () => ({ data: null, error: null }),
+      signInWithPassword: async () => ({ data: null, error: null }),
+      signUp: async () => ({ data: { user: null, session: null }, error: null }),
       signOut: async () => ({ data: null, error: null }),
       onAuthStateChange: () => ({
         data: { subscription: { unsubscribe: () => undefined } },
@@ -104,10 +105,9 @@ export interface SupabaseDiagnostics {
   url: string;
   urlValid: boolean;
   anonKeyPresent: boolean;
-  serviceRoleKeyPresent: boolean;
   providerMode: "supabase" | "local";
   fallbackMode: boolean;
-  authMode: "anon" | "service_role" | "none";
+  authMode: "anon" | "none";
   warnings: string[];
   message: string;
 }
@@ -124,18 +124,13 @@ export function getSupabaseDiagnostics(): SupabaseDiagnostics {
     rawSupabaseUrl && rawSupabaseAnonKey && supabaseUrlValidation.valid
       ? "supabase"
       : "local";
-  const authMode = rawSupabaseAnonKey
-    ? rawSupabaseServiceRoleKey
-      ? "service_role"
-      : "anon"
-    : "none";
+  const authMode = rawSupabaseAnonKey ? "anon" : "none";
  
   return {
     configured,
     url: rawSupabaseUrl,
     urlValid: supabaseUrlValidation.valid,
     anonKeyPresent: Boolean(rawSupabaseAnonKey),
-    serviceRoleKeyPresent: Boolean(rawSupabaseServiceRoleKey),
     providerMode,
     fallbackMode: !configured,
     authMode,

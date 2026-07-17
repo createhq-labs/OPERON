@@ -17,7 +17,7 @@ export function renderQuote(block: AlertBlock, _index: number) {
           marginBottom: "8px",
         }}
       >
-        "
+        &ldquo;
       </div>
 
       <p

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { Document, DriveParsedDocument } from "@/core/types";
-import { getCurrentDocPlatformUser, markDocumentRead } from "@/services/documentPlatform";
+import { saveDocumentProgress } from "@/lib/workforce/documents";
 
 const STORAGE_KEY_PREFIX = "reader-progress:";
 
@@ -68,15 +68,13 @@ export function useDocumentReadPersistence(
   useEffect(() => {
     if (!documentVersionId) return;
 
-    void getCurrentDocPlatformUser()
-      .then((user) => {
-        if (!user) return;
-        return markDocumentRead(documentVersionId, user.id);
-      })
-      .catch(() => {
-        // Best-effort persistence only.
-      });
-  }, [documentVersionId]);
+    const persist = () => void saveDocumentProgress(documentVersionId, progress.percent, 0).catch(() => undefined);
+    persist();
+    const interval = window.setInterval(persist, 15000);
+    const visibility = () => { if (document.visibilityState === "hidden") persist(); };
+    document.addEventListener("visibilitychange", visibility);
+    return () => { window.clearInterval(interval); document.removeEventListener("visibilitychange", visibility); persist(); };
+  }, [documentVersionId, progress.percent]);
 
   useEffect(() => {
     if (!doc?.id || progress.currentSectionId == null) return;
