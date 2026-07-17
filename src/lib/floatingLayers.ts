@@ -1,5 +1,6 @@
 export type FloatingLayerSource =
   | "calendar"
+  | "doc-actions"
   | "mobile-nav"
   | "notification"
   | "search"

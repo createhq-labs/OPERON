@@ -20,17 +20,20 @@ import {
   getPinnedDocuments, getQuickActions, getResourceById, getRoleLabel, getRoles,
   getSupervisors, getTeams, getUserById, getAssignableDepartments,
   getDocumentEntity, searchDocuments, searchResources,
+  updateDocumentMetadata, archiveDocument, replaceDocumentFile,
+  canEditDocuments, canDeleteDocuments,
 } from "@/core/operon";
 import {
   getProviderHealth, setDataProviderMode, subscribeToDataUpdates, onSupabaseHydrated,
 } from "@/services/api";
 import { DocumentReaderShell } from "@/features/reader/DocumentReaderShell";
 import { useSession } from "@/auth/useSession";
-import { MVPAccessMode } from "@/features/auth/MVPAccessMode";
 import { HomePanel } from "@/features/dashboard/HomePanel";
 import { Sidebar } from "@/components/Sidebar";
 import { NotificationBell } from "@/features/notifications/NotificationBell";
 import { PremiumSelect } from "@/components/PremiumSelect";
+import { DocActionsMenu } from "@/components/DocActionsMenu";
+import { Modal, Button } from "@/components/ui/primitives";
 import { ShellSkeleton } from "@/components/ShellSkeleton";
 import { openFloatingLayer, subscribeFloatingLayerClose } from "@/lib/floatingLayers";
 import { motionPreset } from "@/styles/motionPresets";
@@ -118,6 +121,13 @@ export default function Page() {
   const [libraryCategory, setLibraryCategory] = useState<LibraryCategoryId>("all");
   const [libraryDept,     setLibraryDept]     = useState<"all" | DeptId>("all");
 
+  // ── Library doc actions: rename / replace / delete ──────────────────────
+  const [renameDraft,     setRenameDraft]     = useState<{ id: string; title: string } | null>(null);
+  const [deleteTarget,    setDeleteTarget]    = useState<Document | null>(null);
+  const [docActionError,  setDocActionError]  = useState("");
+  const [replaceTargetId, setReplaceTargetId] = useState<string | null>(null);
+  const replaceFileInputRef = useRef<HTMLInputElement | null>(null);
+
   // ── Upload ───────────────────────────────────────────────────────────────
   const [uploadTitle,         setUploadTitle]         = useState("");
   const [uploadCategory,      setUploadCategory]      = useState<DocTag>("sop");
@@ -197,6 +207,9 @@ export default function Page() {
 
   useEffect(() => subscribeFloatingLayerClose("search", () => setIsSearchOpen(false)), []);
   useEffect(() => subscribeFloatingLayerClose("mobile-nav", () => setIsMobileNavOpen(false)), []);
+  useEffect(() => {
+    if (loaded && !user) router.replace("/login");
+  }, [loaded, user, router]);
 
   useEffect(() => {
     if (loaded) return;
@@ -511,6 +524,42 @@ export default function Page() {
     }
   }
 
+  function handleRenameSubmit() {
+    if (!user || !renameDraft || !renameDraft.title.trim()) return;
+    try {
+      updateDocumentMetadata(user, renameDraft.id, { title: renameDraft.title.trim() });
+      setRenameDraft(null);
+      setDocActionError("");
+    } catch (err) {
+      setDocActionError(err instanceof Error ? err.message : "Failed to rename document.");
+    }
+  }
+
+  function handleDeleteConfirm() {
+    if (!user || !deleteTarget) return;
+    try {
+      archiveDocument(user, deleteTarget.id);
+      setDeleteTarget(null);
+      setDocActionError("");
+    } catch (err) {
+      setDocActionError(err instanceof Error ? err.message : "Failed to delete document.");
+    }
+  }
+
+  async function handleReplaceFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0] ?? null;
+    e.currentTarget.value = "";
+    if (!user || !file || !replaceTargetId) { setReplaceTargetId(null); return; }
+    try {
+      await replaceDocumentFile(user, replaceTargetId, file);
+      setDocActionError("");
+    } catch (err) {
+      setDocActionError(err instanceof Error ? err.message : "Failed to replace document.");
+    } finally {
+      setReplaceTargetId(null);
+    }
+  }
+
   function handleCreateResource() {
     if (!user || !resourceCanCreate) { setResourceMessage("No permission to add resources."); return; }
     if (!resourceTitle.trim() || !resourceHref.trim()) { setResourceMessage("Title and link are required."); return; }
@@ -552,7 +601,7 @@ export default function Page() {
 
   if (!loaded) return <ShellSkeleton />;
 
-  if (!user) return <MVPAccessMode />;
+  if (!user) return <ShellSkeleton />;
 
   // ─── Authenticated shell ───────────────────────────────────────────────────
 
@@ -788,20 +837,31 @@ export default function Page() {
                   ) : libraryDocs.length > 0 ? (
                     <div style={{ display: documentView === "grid" ? "grid" : "flex", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", flexDirection: "column", gap: "10px" }} className="doc-grid">
                       {libraryDocs.map((doc) => (
-                        <button key={doc.id} type="button" onClick={() => showDoc(doc.id)}
+                        <div key={doc.id} role="button" tabIndex={0}
+                          onClick={() => showDoc(doc.id)}
+                          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showDoc(doc.id); } }}
                           style={{ ...S.cardInner, padding: "16px", textAlign: "left", cursor: "pointer", border: "1px solid var(--op-border)", display: "flex", flexDirection: documentView === "grid" ? "column" : "row", gap: "12px", alignItems: documentView === "grid" ? "flex-start" : "center", transition: "border-color 150ms" }}
-                          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--op-border-hover)"; }}
-                          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--op-border)"; }}
+                          onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = "var(--op-border-hover)"; }}
+                          onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = "var(--op-border)"; }}
                         >
                           {documentView === "grid" && <div style={{ height: "80px", width: "100%", borderRadius: "var(--r-sm)", background: "rgba(255,255,255,0.04)" }} />}
                           <div style={{ minWidth: 0, flex: 1 }}>
                             <div style={{ fontFamily: "var(--font-ui)", fontSize: "var(--text-14)", fontWeight: 600, color: "var(--op-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.title}</div>
                             <div style={{ fontFamily: "var(--font-body)", fontSize: "var(--text-12)", color: "var(--op-text-2)", marginTop: "4px", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as const }}>{doc.description}</div>
                           </div>
-                          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                          <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
                             <span style={S.badge}>{TAG_LABELS[doc.tag]}</span>
+                            {user && (
+                              <DocActionsMenu
+                                canEdit={canEditDocuments(user)}
+                                canDelete={canDeleteDocuments(user)}
+                                onRename={() => setRenameDraft({ id: doc.id, title: doc.title })}
+                                onReplace={() => { setReplaceTargetId(doc.id); replaceFileInputRef.current?.click(); }}
+                                onDelete={() => setDeleteTarget(doc)}
+                              />
+                            )}
                           </div>
-                        </button>
+                        </div>
                       ))}
                     </div>
                   ) : (
@@ -914,6 +974,53 @@ export default function Page() {
                     {uploadError  && <p style={{ fontFamily: "var(--font-body)", fontSize: "var(--text-12)", color: "var(--color-error)", margin: 0 }}>{uploadError}</p>}
                   </aside>
                 )}
+
+                <input
+                  ref={replaceFileInputRef}
+                  type="file"
+                  accept=".docx,.pdf,.md,.markdown,.txt"
+                  style={{ display: "none" }}
+                  onChange={handleReplaceFileChange}
+                />
+
+                <Modal
+                  open={renameDraft !== null}
+                  title="Rename document"
+                  onClose={() => setRenameDraft(null)}
+                  footer={
+                    <>
+                      <Button variant="ghost" onClick={() => setRenameDraft(null)}>Cancel</Button>
+                      <Button variant="primary" onClick={handleRenameSubmit} disabled={!renameDraft?.title.trim()}>Save</Button>
+                    </>
+                  }
+                >
+                  <input
+                    value={renameDraft?.title ?? ""}
+                    onChange={(e) => setRenameDraft((draft) => (draft ? { ...draft, title: e.target.value } : draft))}
+                    onKeyDown={(e) => { if (e.key === "Enter") handleRenameSubmit(); }}
+                    placeholder="Document title"
+                    autoFocus
+                    style={S.input}
+                  />
+                  {docActionError && <p style={{ ...S.errorText, marginTop: "8px" }}>{docActionError}</p>}
+                </Modal>
+
+                <Modal
+                  open={deleteTarget !== null}
+                  title="Delete document"
+                  onClose={() => setDeleteTarget(null)}
+                  footer={
+                    <>
+                      <Button variant="ghost" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+                      <Button variant="danger" onClick={handleDeleteConfirm}>Delete</Button>
+                    </>
+                  }
+                >
+                  <p style={{ fontFamily: "var(--font-body)", fontSize: "var(--text-14)", color: "var(--op-text-2)", margin: 0 }}>
+                    Remove <strong style={{ color: "var(--op-text)" }}>{deleteTarget?.title}</strong> from the library? This can be undone by an admin, but won't appear for anyone until then.
+                  </p>
+                  {docActionError && <p style={{ ...S.errorText, marginTop: "8px" }}>{docActionError}</p>}
+                </Modal>
 
                 <style>{`@media (max-width: 1023px) { .library-grid { grid-template-columns: minmax(0,1fr) !important; } .pinned-grid { grid-template-columns: repeat(2,1fr) !important; } }`}</style>
               </motion.div>

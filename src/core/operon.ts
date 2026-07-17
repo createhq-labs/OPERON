@@ -417,6 +417,9 @@ export function canManageTeamDocuments(user: User): boolean {
 // ─── Document Visibility ─────────────────────────────────────────────────────
 
 export function canViewDocument(user: User, document: Document): boolean {
+  // Archived documents are hidden from every user, admins included — there is
+  // no restore UI yet, so an archived doc should behave like it's gone.
+  if (document.lifecycleState === "archived") return false;
   if (isAdmin(user)) return true;
   if (!getUserEffectivePermissions(user).documents.view) return false;
   if (!document.allowedUserTypes.includes(user.userType)) return false;
@@ -2991,6 +2994,76 @@ export async function createDocumentUploadFromFile(
   document.ingestionJobId = job.id;
   document.ingestionStatus = job.status;
   api.saveDocument(document);
+
+  startIngestionWorker();
+  return document;
+}
+
+/**
+ * Replaces an existing document's source file in place — same documentId, same
+ * metadata (title/tag/permissions untouched), new content. Re-enqueues an
+ * ingestion job against the existing document so the pipeline overwrites its
+ * blocks/toc when parsing completes, the same way a Drive re-sync updates a
+ * document in place rather than creating a new one.
+ */
+export async function replaceDocumentFile(user: User, documentId: string, file: File): Promise<Document> {
+  requireAuthenticatedUser(user);
+  requireEditingPermission(user);
+
+  const document = getDocumentById(documentId);
+  if (!document) throw new Error("Document not found.");
+
+  const uploadMetadata = await api.saveUploadFileToStorage(file, user.id, {
+    tag:          document.tag,
+    departmentId: document.departmentId,
+  });
+
+  const parserType =
+    getParserByMimeType(uploadMetadata.mimeType || file.type)?.parserType ??
+    getParserByExtension(file.name.split(".").pop()?.toLowerCase())?.parserType ??
+    "plainText";
+
+  Object.assign(document, {
+    rawSourceUrl:    uploadMetadata.rawSourceUrl,
+    previewUrl:      uploadMetadata.previewUrl,
+    mimeType:        uploadMetadata.mimeType,
+    storageBucket:   uploadMetadata.storageBucket,
+    storagePath:     uploadMetadata.storagePath,
+    storageSize:     uploadMetadata.storageSize,
+    uploadedBy:      uploadMetadata.uploadedBy,
+    parserStatus:    "pending",
+    lifecycleState:  "processing",
+    ingestionStatus: "queued",
+    updatedAt:       formatDocumentDate(),
+    updatedById:     user.id,
+  });
+
+  const job = enqueueIngestionJob({
+    documentId: document.id,
+    sourceType: "localUpload",
+    parserType,
+    sourceUrl:  uploadMetadata.rawSourceUrl,
+    fileName:   file.name,
+    mimeType:   uploadMetadata.mimeType || file.type,
+    file,
+    metadata: {
+      authorId:     document.authorId,
+      departmentId: document.departmentId,
+      tag:          document.tag,
+    },
+  });
+
+  document.ingestionJobId = job.id;
+  document.ingestionStatus = job.status;
+  api.saveDocument(document);
+
+  recordActivity({
+    userId:     user.id,
+    action:     "DOCUMENT_EDITED",
+    targetType: "document",
+    targetId:   document.id,
+    metadata:   { title: document.title, fileName: file.name },
+  });
 
   startIngestionWorker();
   return document;
