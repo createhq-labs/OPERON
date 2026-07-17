@@ -29,9 +29,22 @@ export interface AuthSubscription {
   unsubscribe(): void;
 }
 
+/**
+ * Tri-state identity result — distinguishes "no session at all" from
+ * "authenticated with Supabase but no global.users row exists yet" (which
+ * getCurrentUser() alone collapses to the same `null` as "not signed in",
+ * losing the information authContext needs to show a pending-verification
+ * screen instead of bouncing straight to /login).
+ */
+export type IdentityResult =
+  | { kind: "authenticated"; user: User }
+  | { kind: "pending"; authUserId: string; email: string }
+  | { kind: "none" };
+
 export interface AuthAdapter {
   getSession(): Promise<AuthSession | null>;
   getCurrentUser(): Promise<User | null>;
+  resolveIdentity(): Promise<IdentityResult>;
   signIn(): Promise<void>;
   signInWithPassword(email: string, password: string): Promise<void>;
   signUp(email: string, password: string, fullName: string): Promise<{ requiresEmailConfirmation: boolean }>;
@@ -179,47 +192,60 @@ export class SupabaseAuthAdapter implements AuthAdapter {
   }
 
   async getCurrentUser(): Promise<User | null> {
+    const result = await this.resolveIdentity();
+    return result.kind === "authenticated" ? result.user : null;
+  }
+
+  async resolveIdentity(): Promise<IdentityResult> {
     try {
       const session = await this.getSession();
 
       if (session?.userId && session.email) {
-        // 1. Look up existing profile by auth user ID.
+        // 1. Look up existing profile by auth user ID. Must filter on
+        // status='active' — a non-active global.users row (e.g. a pending
+        // signup once provisioned-but-not-yet-active, or a disabled account)
+        // must never resolve as a fully authorized user here. This mirrors
+        // the same filter getBootstrapUser() and lib/workforce/auth.ts's
+        // getCurrentGlobalUser() already apply.
         const { data: existing, error: selectError } = await withTimeout(
           supabase
             .schema("global")
             .from("users")
             .select("*, role:roles(name)")
             .eq("id", session.userId)
-            .single(),
+            .eq("status", "active")
+            .maybeSingle(),
           AUTH_TIMEOUT_MS,
           { data: null, error: { code: "AUTH_TIMEOUT", message: "User profile lookup timed out." } } as never,
         );
 
-        // PGRST116 = row not found — expected on first login. Everything else
-        // is a real error.
-        if (selectError && selectError.code !== "PGRST116") {
+        if (selectError) {
           logRuntimeWarning("Failed to query user profile", {
             error: selectError,
           });
         }
 
         if (existing) {
-          return this.mapSupabaseUser(existing as Record<string, unknown>);
+          return { kind: "authenticated", user: this.mapSupabaseUser(existing as Record<string, unknown>) };
         }
 
         // Profile provisioning belongs to the global identity system. The
-        // browser must never create an identity/RBAC row itself.
+        // browser must never create an identity/RBAC row itself — but it
+        // does need to know "authenticated, awaiting HR verification" is a
+        // distinct state from "not signed in", so the caller can show a
+        // pending screen instead of bouncing to /login.
         logRuntimeWarning("Authenticated account is awaiting global.users provisioning", {
           userId: session.userId,
         });
-        return null;
+        return { kind: "pending", authUserId: session.userId, email: session.email };
       }
 
-      // 3. No real session — fall back to bootstrap mode (dev only).
-      return this.getBootstrapUser();
+      // No real session — fall back to bootstrap mode (dev only).
+      const bootstrapUser = await this.getBootstrapUser();
+      return bootstrapUser ? { kind: "authenticated", user: bootstrapUser } : { kind: "none" };
     } catch (error) {
       logRuntimeWarning("User resolution failed", { error });
-      return null;
+      return { kind: "none" };
     }
   }
 

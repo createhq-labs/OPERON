@@ -37,7 +37,7 @@ import { Modal, Button } from "@/components/ui/primitives";
 import { ShellSkeleton } from "@/components/ShellSkeleton";
 import { openFloatingLayer, subscribeFloatingLayerClose } from "@/lib/floatingLayers";
 import { motionPreset } from "@/styles/motionPresets";
-import { S } from "@/styles/sharedUi";
+import { S, T, Sp } from "@/styles/sharedUi";
 import { DEFAULT_ROLE_ID, ROLE_SELECTION_OPTIONS } from "@/core/roles";
 import { archiveDocument as archiveWorkforceDocument } from "@/lib/workforce/documents";
 import { canAccessWorkforce, canUploadDocument } from "@/security/permissions";
@@ -110,7 +110,7 @@ export type LibraryCategoryId = (typeof LIBRARY_CATEGORIES)[number]["id"];
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function Page() {
-  const { user, loaded, signOut, selectRole } = useSession();
+  const { user, loaded, status, pendingSignup, signOut, selectRole } = useSession();
   const router = useRouter();
 
   // ── Navigation & search ──────────────────────────────────────────────────
@@ -216,8 +216,8 @@ export default function Page() {
   useEffect(() => subscribeFloatingLayerClose("search", () => setIsSearchOpen(false)), []);
   useEffect(() => subscribeFloatingLayerClose("mobile-nav", () => setIsMobileNavOpen(false)), []);
   useEffect(() => {
-    if (loaded && !user) router.replace("/login");
-  }, [loaded, user, router]);
+    if (loaded && !user && status !== "pending_verification") router.replace("/login");
+  }, [loaded, user, status, router]);
 
   useEffect(() => {
     if (loaded) return;
@@ -609,6 +609,58 @@ export default function Page() {
   // ─── Loading screen ───────────────────────────────────────────────────────
 
   if (!loaded) return <ShellSkeleton />;
+
+  if (status === "pending_verification") {
+    const rejected = pendingSignup?.status === "rejected";
+    return (
+      <div
+        style={{
+          minHeight:      "100dvh",
+          display:        "flex",
+          alignItems:     "center",
+          justifyContent: "center",
+          padding:        Sp["6"],
+        }}
+      >
+        <div
+          style={{
+            ...S.card,
+            maxWidth: "440px",
+            width:    "100%",
+            padding:  Sp["10"],
+            display:  "flex",
+            flexDirection: "column",
+            gap: Sp["4"],
+            textAlign: "center",
+          }}
+        >
+          <div
+            style={{
+              ...S.badge,
+              ...(rejected ? {} : S.badgeAccent),
+              alignSelf: "center",
+              color: rejected ? "var(--color-error)" : undefined,
+              borderColor: rejected ? "var(--color-error)" : undefined,
+            }}
+          >
+            {rejected ? "Access not approved" : "Awaiting HR verification"}
+          </div>
+          <h1 style={T.displayLg}>
+            {rejected ? "Your access request was not approved" : "You're signed in — almost there"}
+          </h1>
+          <p style={T.body}>
+            {rejected
+              ? pendingSignup?.rejection_reason ??
+                "HR did not approve this account for Workforce access. Contact HR if you believe this is a mistake."
+              : "HR has been notified of your sign-in and will review your account shortly. You'll gain Workforce access once they verify and provision your profile — role, department, team, and joining date."}
+          </p>
+          <button type="button" style={{ ...S.btnSecondary, alignSelf: "center" }} onClick={() => void signOut()}>
+            Sign out
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (!user) return <ShellSkeleton />;
 

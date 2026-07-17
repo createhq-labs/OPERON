@@ -10,15 +10,25 @@ until the live identity and `global.users` RLS checks below pass.**
 Both password and Google authentication converge on the same path:
 
 1. Supabase Auth creates or restores `auth.users` and a session.
-2. `SupabaseAuthAdapter.getCurrentUser()` selects `global.users` where
-   `global.users.id = session.user.id` and `status = active`.
+2. `SupabaseAuthAdapter.resolveIdentity()` selects `global.users` where
+   `global.users.id = session.user.id` and `status = active` (`getCurrentUser()`
+   is now a thin wrapper over this for backward compatibility).
 3. `global.roles.name` is loaded through `global.users.role_id`.
 4. Centralized capabilities derive UI access from that database role name.
-5. Missing or inactive `global.users` produces no application user and protected
-   routes return to login.
+5. Missing or inactive `global.users` no longer bounces straight to login: the
+   session is authenticated but unprovisioned, so `resolveIdentity()` returns a
+   `"pending"` result instead of `null`. `authContext.tsx` surfaces this as
+   `status: "pending_verification"`, registers a `workforce.pending_signups`
+   row via `request_signup_verification()` (once per `AuthProvider` mount) and
+   shows a dedicated pending screen — no Workforce chrome, no protected routes.
+   HR is notified and reviews the request at `/workforce/signups`; only
+   `decide_pending_signup()`'s explicit approval path ever inserts into
+   `global.users` (see `supabase-migrations/workforce-rebuild/008_workforce_pending_signups.sql`).
 
 Signup metadata (`full_name`) is not treated as authorization. The browser does
-not create `global.users`, assign roles, departments, managers, or permissions.
+not create `global.users`, assign roles, departments, managers, or permissions —
+the one and only write path is `decide_pending_signup()`, gated on
+`can_manage_onboarding()` and reachable only after explicit HR approval.
 
 ## Central role mapping
 

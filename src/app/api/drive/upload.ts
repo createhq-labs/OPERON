@@ -262,7 +262,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     // -- Enqueue ingestion ---------------------------------------------------
     if (localMode) {
-      await startIngestionWorker();
+      enqueueIngestionJob({
+        documentId: legacyId,
+        sourceType: "localUpload",
+        parserType: determineParserType(fileMimeType),
+        sourceUrl: driveWebViewLink,
+        fileName: uploadedFileName,
+        mimeType: fileMimeType,
+        metadata: { departmentId: departmentId ?? "", tags: [tag], authorId: userId },
+        file,
+      });
+      startIngestionWorker();
     } else {
       const parserType = determineParserType(fileMimeType);
       const rawPayload = await extractDriveExportPayload(
@@ -280,6 +290,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         metadata: { departmentId: departmentId ?? "", tags: [tag], authorId: userId },
         rawPayload,
       });
+      startIngestionWorker();
     }
 
     // -- Activity log --------------------------------------------------------

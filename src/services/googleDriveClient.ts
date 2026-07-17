@@ -493,7 +493,9 @@ export async function extractDriveExportPayload(accessToken: string, fileId: str
   const bytes = await downloadDriveFileBytes(accessToken, fileId, exportMimeType);
   const base64 = Buffer.from(bytes).toString("base64");
   return {
-    fileName: `${metadata.name || fileId}.${exportMimeType === "text/csv" ? "csv" : exportMimeType === "text/plain" ? "txt" : "bin"}`,
+    fileName: exportMimeType
+      ? `${metadata.name || fileId}.${exportMimeType === "text/csv" ? "csv" : exportMimeType === "text/plain" ? "txt" : "bin"}`
+      : metadata.name || fileId,
     mimeType: metadata.mimeType,
     contentBase64: base64,
     parserType,
