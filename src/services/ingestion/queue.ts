@@ -1,6 +1,5 @@
 import type { IngestionJob, IngestionJobInput } from "./types";
 import { saveIngestionJob, getIngestionJobs as getPersistedIngestionJobs } from "@/services/api";
-import { normalizeIngestionStatus } from "./status";
 
 const ingestionQueue: IngestionJob[] = [];
 
@@ -44,10 +43,6 @@ export function getIngestionJobs() {
   return [...ingestionQueue];
 }
 
-export function getIngestionJobById(id: string) {
-  return ingestionQueue.find((job) => job.id === id) || getPersistedIngestionJobs().find((job) => job.id === id);
-}
-
 export function dequeueIngestionJob() {
   const now = new Date();
   const index = ingestionQueue.findIndex((job) =>
@@ -72,22 +67,3 @@ export function updateIngestionJob(updated: IngestionJob) {
   return updated;
 }
 
-export function removeIngestionJob(jobId: string) {
-  const index = ingestionQueue.findIndex((job) => job.id === jobId);
-  if (index !== -1) {
-    ingestionQueue.splice(index, 1);
-  }
-}
-
-export function hydrateIngestionQueue() {
-  const persisted = getPersistedIngestionJobs();
-  persisted.forEach((job) => {
-    if (!ingestionQueue.some((queued) => queued.id === job.id)) {
-      ingestionQueue.push({
-        ...job,
-        file: undefined,
-        status: normalizeIngestionStatus(job.status),
-      });
-    }
-  });
-}

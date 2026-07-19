@@ -110,7 +110,7 @@ export type LibraryCategoryId = (typeof LIBRARY_CATEGORIES)[number]["id"];
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function Page() {
-  const { user, loaded, status, pendingSignup, signOut, selectRole } = useSession();
+  const { user, loaded, status, deniedEmail, signOut, selectRole } = useSession();
   const router = useRouter();
 
   // ── Navigation & search ──────────────────────────────────────────────────
@@ -216,7 +216,7 @@ export default function Page() {
   useEffect(() => subscribeFloatingLayerClose("search", () => setIsSearchOpen(false)), []);
   useEffect(() => subscribeFloatingLayerClose("mobile-nav", () => setIsMobileNavOpen(false)), []);
   useEffect(() => {
-    if (loaded && !user && status !== "pending_verification") router.replace("/login");
+    if (loaded && !user && status !== "not_invited") router.replace("/login");
   }, [loaded, user, status, router]);
 
   useEffect(() => {
@@ -610,8 +610,7 @@ export default function Page() {
 
   if (!loaded) return <ShellSkeleton />;
 
-  if (status === "pending_verification") {
-    const rejected = pendingSignup?.status === "rejected";
+  if (status === "not_invited") {
     return (
       <div
         style={{
@@ -634,25 +633,13 @@ export default function Page() {
             textAlign: "center",
           }}
         >
-          <div
-            style={{
-              ...S.badge,
-              ...(rejected ? {} : S.badgeAccent),
-              alignSelf: "center",
-              color: rejected ? "var(--color-error)" : undefined,
-              borderColor: rejected ? "var(--color-error)" : undefined,
-            }}
-          >
-            {rejected ? "Access not approved" : "Awaiting HR verification"}
+          <div style={{ ...S.badge, alignSelf: "center", color: "var(--color-error)", borderColor: "var(--color-error)" }}>
+            Account not provisioned
           </div>
-          <h1 style={T.displayLg}>
-            {rejected ? "Your access request was not approved" : "You're signed in — almost there"}
-          </h1>
+          <h1 style={T.displayLg}>Your account has not been provisioned</h1>
           <p style={T.body}>
-            {rejected
-              ? pendingSignup?.rejection_reason ??
-                "HR did not approve this account for Workforce access. Contact HR if you believe this is a mistake."
-              : "HR has been notified of your sign-in and will review your account shortly. You'll gain Workforce access once they verify and provision your profile — role, department, team, and joining date."}
+            {deniedEmail ? <>No invitation was found for <strong>{deniedEmail}</strong>. </> : null}
+            Please contact HR to be added to Workforce.
           </p>
           <button type="button" style={{ ...S.btnSecondary, alignSelf: "center" }} onClick={() => void signOut()}>
             Sign out

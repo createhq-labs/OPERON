@@ -9,26 +9,43 @@ until the live identity and `global.users` RLS checks below pass.**
 
 Both password and Google authentication converge on the same path:
 
-1. Supabase Auth creates or restores `auth.users` and a session.
+Self-signup is disabled — there is no "create account" path for either
+password or Google authentication. HR provisions an employee's full record
+(role, department, designation, manager, joining date, employment status)
+*before* the person ever logs in, via an invitation created at
+`/workforce/invitations`. Both password and Google authentication converge on
+the same path after that:
+
+1. Supabase Auth creates or restores `auth.users` and a session (Google will
+   still create this row for anyone who clicks the button, invited or not —
+   inherent to Supabase-managed OAuth; see step 5).
 2. `SupabaseAuthAdapter.resolveIdentity()` selects `global.users` where
    `global.users.id = session.user.id` and `status = active` (`getCurrentUser()`
-   is now a thin wrapper over this for backward compatibility).
+   is a thin wrapper over this for backward compatibility).
 3. `global.roles.name` is loaded through `global.users.role_id`.
 4. Centralized capabilities derive UI access from that database role name.
-5. Missing or inactive `global.users` no longer bounces straight to login: the
-   session is authenticated but unprovisioned, so `resolveIdentity()` returns a
-   `"pending"` result instead of `null`. `authContext.tsx` surfaces this as
-   `status: "pending_verification"`, registers a `workforce.pending_signups`
-   row via `request_signup_verification()` (once per `AuthProvider` mount) and
-   shows a dedicated pending screen — no Workforce chrome, no protected routes.
-   HR is notified and reviews the request at `/workforce/signups`; only
-   `decide_pending_signup()`'s explicit approval path ever inserts into
-   `global.users` (see `supabase-migrations/workforce-rebuild/008_workforce_pending_signups.sql`).
+5. If no `global.users` row exists yet, `resolveIdentity()` calls
+   `workforce.consume_employee_invitation()` — the *only* code path that
+   ever writes to `global.users`, and it only ever acts on the calling
+   session's own identity (`auth.uid()`), never a client-supplied target. If
+   the caller's email matches a pending invitation, it atomically creates
+   `global.users` + `workforce.employment_details` from what HR already
+   entered and marks the invitation consumed; `resolveIdentity()` then
+   returns the newly authenticated user. If no invitation matches, it
+   returns `false` and touches nothing — `resolveIdentity()` returns a
+   `"not_invited"` result instead of `null`, and `authContext.tsx` surfaces
+   `status: "not_invited"` with a hard "contact HR" denial screen — no
+   queue, no waiting state, no Workforce chrome, no protected routes. See
+   `supabase-migrations/workforce-rebuild/008_workforce_employee_invitations.sql`.
 
-Signup metadata (`full_name`) is not treated as authorization. The browser does
-not create `global.users`, assign roles, departments, managers, or permissions —
-the one and only write path is `decide_pending_signup()`, gated on
-`can_manage_onboarding()` and reachable only after explicit HR approval.
+Invitation metadata is never trusted over the authenticated session itself —
+`consume_employee_invitation()` prefers the real name from the auth
+provider's own metadata over HR's pre-filled guess. The browser never
+creates `global.users`, assigns roles, departments, managers, or permissions
+directly — the one and only write path is `consume_employee_invitation()`,
+and the one and only place a role is ever *chosen* is
+`create_employee_invitation()`, gated on `can_manage_onboarding()` plus an
+admin-only check for assigning any HR/founder-tier role.
 
 ## Central role mapping
 

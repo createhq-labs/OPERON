@@ -7,7 +7,6 @@ import { parseHtmlDocument }       from "@/services/parser/htmlParser";
 import { parseMarkdownDocument }   from "@/services/parser/markdownParser";
 import { parseCsvDocument }        from "@/services/parser/csvParser";
 import { parseJsonDocument }       from "@/services/parser/jsonParser";
-import { parseUploadedDocument }   from "@/services/parser/parserFactory";
 import { registerParser, resolveParser } from "@/services/parser/registry";
 
 // Register all parsers on module load.
@@ -129,10 +128,6 @@ function registerParsers(): void {
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
-
-export async function parseUploadedFile(file: File): Promise<ParserResult> {
-  return parseUploadedDocument(file);
-}
 
 export function parseGoogleDriveDocument(
   document: DriveDocumentPayload

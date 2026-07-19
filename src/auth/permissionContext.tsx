@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { createContext, useMemo, type ReactNode } from "react";
 import { useAuth } from "@/auth/authContext";
 import {
   canEditDocument,
@@ -71,14 +71,4 @@ export function PermissionProvider({ children }: { children: ReactNode }) {
       {children}
     </PermissionContext.Provider>
   );
-}
-
-// ─── Hook ─────────────────────────────────────────────────────────────────────
-
-/**
- * Returns the current user's permission set.
- * Must be used inside <PermissionProvider>.
- */
-export function usePermissions(): PermissionContextValue {
-  return useContext(PermissionContext);
 }

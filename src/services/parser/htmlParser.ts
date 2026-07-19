@@ -3,7 +3,6 @@ import type {
   ParserResult,
   HeadingBlock,
   ParagraphBlock,
-  StepsBlock,
   CodeBlock,
   TableBlock,
   ImageBlock,

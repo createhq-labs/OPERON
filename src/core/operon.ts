@@ -95,18 +95,9 @@ export type {
 } from "@/core/types";
 
 export {
-  EMPTY_ROLE_PERMISSIONS,
-  mergePermissions,
-  userMatchesAccessRestrictions,
-  deriveAvatar,
-  estimateReadTime,
-  normalizeTocItems,
   formatDocumentDate,
   formatRelativeTime,
 } from "@/core/helpers";
-
-export { ROLE_IDS, DEFAULT_ROLE_ID, ROLE_SELECTION_OPTIONS } from "@/core/roles";
-export type { RoleSelectionId, RoleSelectionOption } from "@/core/roles";
 
 // Pull in types we use internally in this file
 import { ROLE_IDS, DEFAULT_ROLE_ID } from "@/core/roles";
@@ -121,18 +112,11 @@ import type {
   Block,
   Document,
   DriveDocumentReference,
-  DriveDocumentPermission,
-  DocumentSource,
-  DocumentState,
   VisibilityScope,
   BroadcastAudience,
   ResourceItem,
   ResourceCategory,
-  VideoItem,
-  VideoProvider,
-  VideoTimestamp,
   ActivityEvent,
-  DocumentVersion,
   UserType,
   TocItem,
   DriveParsedDocument,
@@ -145,7 +129,6 @@ import type {
   Holiday,
   HolidayType,
   ProbationRecord,
-  ProbationNote,
   DeboardingRecord,
   DeboardingTrack,
   ManagerHistoryEntry,
@@ -155,7 +138,6 @@ import { PROBATION_ACTIVE_STATUSES } from "@/core/types";
 
 import {
   EMPTY_ROLE_PERMISSIONS,
-  mergePermissions,
   getRoleEffectivePermissions as computeRoleEffectivePermissions,
   getRolePermissionIds as computeRolePermissionIds,
   permissionFromPolicy,
@@ -167,13 +149,9 @@ import {
   deriveQuickActions,
   generateIngestionJobId,
   generateDocumentId,
-  generateDriveDocumentId,
   generateActivityId,
   generateUserId,
-  generateVideoId,
   generateResourceId,
-  generateSnapshotId,
-  generateOnboardingId,
   generateLeaveRequestId,
   generateAttendanceId,
   generateHolidayId,
@@ -192,11 +170,9 @@ import { isVisibleToUser } from "@/security/visibility";
 import { getCurrentDocumentVersionId } from "@/services/documentPlatform";
 import {
   requireAuthenticatedUser,
-  requirePublishingPermission,
   requireResourceManagementPermission,
   requireUploadPermission,
   requireEditingPermission,
-  requireOwnRecordOrPermission,
   requireHrCalendarManagementPermission,
   requireProbationSubmissionPermission,
   requireProbationDecisionPermission,
@@ -218,7 +194,6 @@ import {
 import { FOUNDER_TIER_ROLES } from "@/security/rolePolicies";
 import {
   searchDocuments as searchDocumentsService,
-  searchDriveDocuments as searchDriveDocumentsService,
   searchResources as searchResourcesService,
 } from "@/services/search";
 
@@ -232,11 +207,11 @@ export function getRoleById(id: RoleId) {
   return api.getRoleById(id);
 }
 
-export function getUserRole(user: User) {
+function getUserRole(user: User) {
   return getRoleById(user.roleId);
 }
 
-export function getRoleEffectivePermissions(role: Role): RolePermissions {
+function getRoleEffectivePermissions(role: Role): RolePermissions {
   return computeRoleEffectivePermissions(role, getRoleById);
 }
 
@@ -244,7 +219,7 @@ export function getRolePermissionIds(role: Role): PermissionId[] {
   return computeRolePermissionIds(getRoleEffectivePermissions(role));
 }
 
-export function getUserEffectivePermissions(user: User): RolePermissions {
+function getUserEffectivePermissions(user: User): RolePermissions {
   const role = getUserRole(user);
   return role ? getRoleEffectivePermissions(role) : EMPTY_ROLE_PERMISSIONS;
 }
@@ -257,7 +232,7 @@ export function isAdmin(user: User): boolean {
   return getUserEffectivePermissions(user).system.adminPanelAccess;
 }
 
-export function isLeadRole(user: User): boolean {
+function isLeadRole(user: User): boolean {
   const perms = getUserEffectivePermissions(user);
   return perms.system.roleManagement && !perms.system.adminPanelAccess;
 }
@@ -294,7 +269,7 @@ export function getDepartments() {
   return api.getDepartments();
 }
 
-export function getDepartmentById(id: DeptId) {
+function getDepartmentById(id: DeptId) {
   return api.getDepartmentById(id);
 }
 
@@ -327,9 +302,6 @@ export function registerLocalUser(user: User) {
   return api.registerLocalUser(user);
 }
 
-export function getUserByRoleId(roleId: RoleId) {
-  return api.getUserByRoleId(roleId);
-}
 
 /** Alias for getUsers() — prefer getUsers() in new code. */
 export function getAllUsers() {
@@ -338,25 +310,21 @@ export function getAllUsers() {
 
 // ─── Document Queries ─────────────────────────────────────────────────────────
 
-export function getDocuments() {
+function getDocuments() {
   return api.getDocuments();
 }
 
-export function getDocumentById(id: string) {
+function getDocumentById(id: string) {
   return api.getDocumentById(id);
 }
 
-export function getDriveDocuments() {
-  return api.getDriveDocuments();
-}
-
-export function getDriveDocumentById(id: string) {
+function getDriveDocumentById(id: string) {
   return api.getDriveDocumentById(id);
 }
 
 // ─── Resource & Video Queries ─────────────────────────────────────────────────
 
-export function getResources() {
+function getResources() {
   return api.getResources();
 }
 
@@ -364,11 +332,8 @@ export function getResourceById(id: string) {
   return api.getResourceById(id);
 }
 
-export function getVideos() {
-  return api.getVideos();
-}
 
-export function getActivityEvents() {
+function getActivityEvents() {
   return api.getActivityEvents();
 }
 
@@ -390,14 +355,6 @@ export function canViewActivity(user: User): boolean {
   return hasPermission(user, "view_activity");
 }
 
-export function canAddDocuments(user: User): boolean {
-  return hasPermission(user, "add_documents");
-}
-
-export function canUploadDocuments(user: User): boolean {
-  return hasPermission(user, "manage_uploads");
-}
-
 export function canPublishGlobally(user: User): boolean {
   return hasPermission(user, "send_to_all");
 }
@@ -408,10 +365,6 @@ export function canEditDocuments(user: User): boolean {
 
 export function canDeleteDocuments(user: User): boolean {
   return hasPermission(user, "delete_documents");
-}
-
-export function canManageTeamDocuments(user: User): boolean {
-  return hasPermission(user, "manage_team_documents") || isAdmin(user);
 }
 
 // ─── Document Visibility ─────────────────────────────────────────────────────
@@ -444,7 +397,7 @@ export function canViewDocument(user: User, document: Document): boolean {
   );
 }
 
-export function canViewDriveDocument(user: User, document: DriveDocumentReference): boolean {
+function canViewDriveDocument(user: User, document: DriveDocumentReference): boolean {
   if (isAdmin(user)) return true;
   if (!getUserEffectivePermissions(user).documents.view) return false;
   if (!document.allowedUserTypes.includes(user.userType)) return false;
@@ -503,34 +456,11 @@ export function getAccessibleDocument(user: User, id: string) {
   return doc && canViewDocument(user, doc) ? doc : undefined;
 }
 
-export function getAccessibleDriveDocuments(user: User) {
-  return getDriveDocuments().filter((doc) => canViewDriveDocument(user, doc));
-}
-
-export function getAccessibleDocumentEntities(user: User) {
-  return [...getAccessibleDocuments(user), ...getAccessibleDriveDocuments(user)];
-}
 
 export function getPinnedDocuments(user: User, limit = 3) {
   return getAccessibleDocuments(user)
     .filter((doc) => doc.pinned)
     .slice(0, limit);
-}
-
-export function getAccessibleResources(user: User) {
-  return getResources().filter((resource) => canViewResource(user, resource));
-}
-
-export function getAccessibleVideos(user: User) {
-  return getVideos().filter((video) =>
-    isVisibleToUser(
-      user,
-      video.visibilityScope,
-      video.allowedDepartments?.[0],
-      video.allowedUserTypes,
-      [video.createdById],
-    ),
-  );
 }
 
 // ─── Search ───────────────────────────────────────────────────────────────────
@@ -539,17 +469,13 @@ export function searchDocuments(user: User, query = "", departmentId?: DeptId | 
   return searchDocumentsService(user, getDocuments(), query, departmentId);
 }
 
-export function searchDriveDocuments(user: User, query = "", departmentId?: DeptId | "all") {
-  return searchDriveDocumentsService(user, getDriveDocuments(), query, departmentId);
-}
-
 export function searchResources(user: User, query = "", category?: ResourceCategory) {
   return searchResourcesService(user, getResources(), query, category);
 }
 
 // ─── Drive Document Parsing ───────────────────────────────────────────────────
 
-export async function getParsedDriveDocument(id: string): Promise<DriveParsedDocument | undefined> {
+async function getParsedDriveDocument(id: string): Promise<DriveParsedDocument | undefined> {
   const reference = getDriveDocumentById(id);
   if (!reference) return undefined;
 
@@ -575,37 +501,6 @@ export async function getParsedDriveDocument(id: string): Promise<DriveParsedDoc
   };
 }
 
-export async function refreshDriveDocumentSync(id: string): Promise<DriveParsedDocument> {
-  const reference = getDriveDocumentById(id);
-  if (!reference) throw new Error("Drive document not found");
-
-  const documentVersionId =
-    reference.documentVersionId ??
-    (reference.linkedDocumentId
-      ? await getCurrentDocumentVersionId(reference.linkedDocumentId)
-      : undefined);
-
-  const rawDoc = await api.fetchGoogleDocsApiDocument(reference.googleDocId);
-  const parsed = parseGoogleDriveDocument(rawDoc as never);
-
-  api.updateDriveDocumentSyncMetadata(id, {
-    lastSyncedAt: new Date().toISOString(),
-    syncStatus:   "synced",
-    updatedAt:    formatDocumentDate(),
-  });
-
-  return {
-    ...reference,
-    documentVersionId,
-    toc: normalizeTocItems(
-      parsed.toc.map((item: { id: string; label?: string; text?: string; level: 1 | 2 | 3 }) => ({
-        ...item,
-        label: item.label ?? item.text,
-      }))
-    ),
-    blocks: parsed.blocks as unknown as Block[],
-  };
-}
 
 export async function getDocumentEntity(user: User, id: string) {
   const nativeDoc = getAccessibleDocument(user, id);
@@ -625,7 +520,7 @@ export function getActivityFeed(user: User) {
     .sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
 }
 
-export function recordActivity(event: Omit<ActivityEvent, "id" | "timestamp">) {
+function recordActivity(event: Omit<ActivityEvent, "id" | "timestamp">) {
   const activity: ActivityEvent = {
     ...event,
     id:        generateActivityId(),
@@ -663,11 +558,6 @@ export function getQuickActions(user: User) {
 
 // ─── Sign-In Role Options ─────────────────────────────────────────────────────
 
-export function getSignInRoleOptions() {
-  return getRoles().filter(
-    (role) => role.userType === "employee" || role.userType === "creator",
-  );
-}
 
 // ─── User Management ─────────────────────────────────────────────────────────
 
@@ -685,7 +575,7 @@ export function getCreatableRoles(user: User) {
   return [];
 }
 
-export function canCreateUser(user: User, roleId: RoleId): boolean {
+function canCreateUser(user: User, roleId: RoleId): boolean {
   if (isAdmin(user)) return true;
   if (!canManageRoles(user) && !canManagePeople(user)) return false;
   return getCreatableRoles(user).some((role) => role.id === roleId);
@@ -854,7 +744,7 @@ export function getRosterUsers(): User[] {
  * everyone, a team lead sees their own reports plus themselves (if they're
  * roster-eligible), everyone else sees just themselves.
  */
-export function getRosterUsersFor(actor: User): User[] {
+function getRosterUsersFor(actor: User): User[] {
   if (canViewAllHrRecords(actor)) return getRosterUsers();
   const reports = getMyDirectReports(actor);
   const own = ROSTER_EXCLUDED_ROLES.has(actor.roleId) ? [] : [actor];
@@ -863,46 +753,12 @@ export function getRosterUsersFor(actor: User): User[] {
 
 // ─── HR: Onboarding ─────────────────────────────────────────────────────────
 
-export function getMyOnboardingRecord(user: User): OnboardingRecord | undefined {
-  return api.getOnboardingRecords().find((record) => record.userId === user.id);
-}
-
 export function getOnboardingRecords(actor: User): OnboardingRecord[] {
   requireAuthenticatedUser(actor);
   const scopeIds = new Set(getRosterUsersFor(actor).map((u) => u.id));
   return api.getOnboardingRecords().filter((record) => scopeIds.has(record.userId));
 }
 
-export function submitOnboarding(
-  user: User,
-  input: { onboardingData: Record<string, string>; complianceData: Record<string, string> }
-): OnboardingRecord {
-  requireAuthenticatedUser(user);
-
-  const existing = getMyOnboardingRecord(user);
-  const now = formatDocumentDate();
-  const record: OnboardingRecord = {
-    id:             existing?.id ?? generateOnboardingId(),
-    userId:         user.id,
-    status:         "submitted",
-    onboardingData: input.onboardingData,
-    complianceData: input.complianceData,
-    form11SentAt:   existing?.form11SentAt,
-    submittedAt:    now,
-    createdAt:      existing?.createdAt ?? now,
-  };
-
-  api.saveOnboardingRecord(record);
-  recordActivity({
-    userId:     user.id,
-    action:     "ONBOARDING_SUBMITTED",
-    targetType: "hr_record",
-    targetId:   record.id,
-    metadata:   { userId: user.id },
-  });
-
-  return record;
-}
 
 export function acknowledgeOnboarding(actor: User, onboardingId: string): OnboardingRecord {
   requireAuthenticatedUser(actor);
@@ -1085,21 +941,10 @@ export function canApproveLeaveRequestAsFounder(actor: User, request: LeaveReque
   return request.status === "pending" && getFirstLeaveApprover(subject)?.id === actor.id;
 }
 
-export function getLeaveRequestDetail(actor: User, requestId: string): LeaveRequest | null {
-  const request = api.getLeaveRequestById(requestId);
-  if (!request) return null;
-  requireOwnRecordOrPermission(actor, request.userId, canViewAllHrRecords(actor) || canApproveLeaveAsHr(actor));
-  return request;
-}
-
-export function getLeaveApprovalQueueForTl(actor: User): LeaveRequest[] {
-  return api.getLeaveRequests().filter((request) => canApproveLeaveRequestAsTl(actor, request));
-}
 
 /**
  * Full leave/WFH history (any status, not just pending) for a TL's direct
- * reports — distinct from getLeaveApprovalQueueForTl, which only surfaces
- * requests currently awaiting that TL's action.
+ * reports.
  */
 export function getTeamLeaveHistoryForTl(actor: User): LeaveRequest[] {
   requireAuthenticatedUser(actor);
@@ -1236,32 +1081,6 @@ export function submitLeaveRequest(
   return request;
 }
 
-export function cancelLeaveRequest(user: User, requestId: string): LeaveRequest {
-  requireAuthenticatedUser(user);
-
-  const request = api.getLeaveRequestById(requestId);
-  if (!request) throw new Error("Leave request not found.");
-  if (request.userId !== user.id) throw new Error("You can only cancel your own requests.");
-  if (request.status !== "pending") {
-    throw new Error("Only pending requests can be cancelled. Contact HR to cancel a request that has already been approved.");
-  }
-
-  const now = formatDocumentDate();
-  request.status      = "cancelled";
-  request.cancelledAt = now;
-  request.updatedAt   = now;
-
-  api.saveLeaveRequest(request);
-  recordActivity({
-    userId:     user.id,
-    action:     "LEAVE_CANCELLED",
-    targetType: "hr_record",
-    targetId:   request.id,
-    metadata:   { requestType: request.requestType },
-  });
-
-  return request;
-}
 
 export function approveLeaveAsTl(actor: User, requestId: string): LeaveRequest {
   const request = api.getLeaveRequestById(requestId);
@@ -1572,7 +1391,7 @@ function enumerateDates(fromIso: string, toIso: string): string[] {
  * themselves, a team lead sees themselves plus direct reports, and HR tier
  * sees everyone. The calendar UI renders whatever this returns.
  */
-export function getAttendanceScopeUsers(actor: User): User[] {
+function getAttendanceScopeUsers(actor: User): User[] {
   if (canViewAllHrRecords(actor)) {
     const users = getUsers();
     return users.some((user) => user.id === actor.id) ? users : [actor, ...users];
@@ -1626,19 +1445,6 @@ export function setAttendanceDay(
   return record;
 }
 
-export function computeAttendanceTotals(record: AttendanceRecord | undefined): {
-  present: number;
-  leave:   number;
-  wfh:     number;
-} {
-  const totals = { present: 0, leave: 0, wfh: 0 };
-  for (const status of Object.values(record?.days ?? {})) {
-    if (status === "present") totals.present += 1;
-    else if (status === "leave") totals.leave += 1;
-    else if (status === "wfh") totals.wfh += 1;
-  }
-  return totals;
-}
 
 /**
  * Attendance records for one employee spanning a date range (inclusive),
@@ -1842,40 +1648,6 @@ export function updateRosterMemberDetails(
  * dateJoined drives probation math and attendance-history defaults, so only
  * HR/workforce-admin tier may change it, and every change is audited.
  */
-export function updateDateJoined(actor: User, userId: string, newDate: string): User {
-  requireManagePeoplePermission(actor);
-
-  const user = getUserById(userId);
-  if (!user) throw new Error("User not found.");
-  if (!newDate) throw new Error("Date joined is required.");
-
-  const oldDate = user.dateJoined;
-  const updated: User = { ...user, dateJoined: newDate };
-  api.saveUser(updated);
-
-  // Keep an in-progress probation cycle's review date in sync with the
-  // corrected join date rather than leaving it silently stale.
-  const activeProbation = api.getProbationRecords().find(
-    (r) => r.userId === userId && PROBATION_ACTIVE_STATUSES.has(r.status) && !r.reviewedAt,
-  );
-  if (activeProbation) {
-    const joinDate = new Date(`${newDate}T00:00:00`);
-    joinDate.setDate(joinDate.getDate() + activeProbation.probationDurationDays);
-    activeProbation.dateJoined = newDate;
-    activeProbation.expectedReviewDate = toIsoDateLocal(joinDate);
-    api.saveProbationRecord(activeProbation);
-  }
-
-  recordActivity({
-    userId:     actor.id,
-    action:     "DATE_JOINED_CHANGED",
-    targetType: "user",
-    targetId:   userId,
-    metadata:   { oldDate: oldDate ?? "", newDate },
-  });
-
-  return updated;
-}
 
 export function getManagerHistoryForUser(userId: string): ManagerHistoryEntry[] {
   return api.getManagerHistory()
@@ -1976,73 +1748,8 @@ export function getProbationHistoryForUser(userId: string): ProbationRecord[] {
   return chain;
 }
 
-export function getProbationNotesForRecord(recordId: string): ProbationNote[] {
-  return api.getProbationNotesForRecord(recordId);
-}
 
-export function addProbationNote(
-  actor: User,
-  probationId: string,
-  note: string,
-  noteType: ProbationNote["noteType"] = "general",
-): ProbationNote {
-  requireAuthenticatedUser(actor);
-  if (!canViewAllHrRecords(actor)) throw new Error("No permission to add probation notes.");
-  if (!note.trim()) throw new Error("Note text is required.");
 
-  const record = api.getProbationRecordById(probationId);
-  if (!record) throw new Error("Probation record not found.");
-
-  const entry: ProbationNote = {
-    id:                generateProbationId(),
-    probationRecordId: probationId,
-    authorId:          actor.id,
-    note:              note.trim(),
-    noteType,
-    createdAt:         formatDocumentDate(),
-  };
-  api.saveProbationNote(entry);
-  recordActivity({
-    userId:     actor.id,
-    action:     "PROBATION_NOTE_ADDED",
-    targetType: "hr_record",
-    targetId:   probationId,
-    metadata:   { noteType },
-  });
-  return entry;
-}
-
-export function markProbationUnderReview(actor: User, probationId: string): ProbationRecord {
-  requireProbationDecisionPermission(actor);
-
-  const record = api.getProbationRecordById(probationId);
-  if (!record) throw new Error("Probation record not found.");
-  if (record.status !== "pending") throw new Error("Only pending records can be moved to under review.");
-
-  record.status = "under_review";
-  api.saveProbationRecord(record);
-  recordActivity({
-    userId:     actor.id,
-    action:     "PROBATION_UNDER_REVIEW",
-    targetType: "hr_record",
-    targetId:   record.id,
-    metadata:   { userId: record.userId },
-  });
-
-  // Notify HR that the founder has started reviewing.
-  notifyUsers({
-    title:            "Probation review in progress",
-    body:             `${getUserById(record.userId)?.name ?? "An employee"}'s probation is now under review.`,
-    notificationType: "user",
-    audience:         "role",
-    roleIds:          [ROLE_IDS.ADMIN],
-    actorId:          actor.id,
-    entityType:       "probation",
-    entityId:         record.id,
-  });
-
-  return record;
-}
 
 const DEFAULT_PROBATION_DAYS = 90;
 
@@ -2602,7 +2309,7 @@ function resolveNotificationRecipients(input: {
   }
 }
 
-export function notifyUsers(input: {
+function notifyUsers(input: {
   title:             string;
   body:              string;
   notificationType:  Notification["notificationType"];
@@ -2637,25 +2344,7 @@ export function notifyUsers(input: {
   return api.saveNotification(notification);
 }
 
-export function getNotificationsForUser(user: User): Notification[] {
-  return api.getNotifications().filter((notification) => {
-    switch (notification.audience) {
-      case "all":        return true;
-      case "user":       return notification.userIds?.includes(user.id) ?? false;
-      case "role":       return notification.roleIds?.includes(user.roleId) ?? false;
-      case "department": return user.departmentId ? (notification.departmentIds?.includes(user.departmentId) ?? false) : false;
-      default:           return false;
-    }
-  });
-}
 
-export function markNotificationRead(user: User, notificationId: string): Notification | null {
-  const notification = api.getNotifications().find((n) => n.id === notificationId);
-  if (!notification) return null;
-
-  notification.unreadBy = (notification.unreadBy ?? []).filter((id) => id !== user.id);
-  return api.saveNotification(notification);
-}
 
 // ─── Resource Mutations ───────────────────────────────────────────────────────
 
@@ -2717,73 +2406,11 @@ export function createResource(resource: {
 
 // ─── Video Mutations ──────────────────────────────────────────────────────────
 
-export function createVideoItem(input: {
-  title:             string;
-  description:       string;
-  provider:          VideoProvider;
-  embedUrl:          string;
-  thumbnail?:        string;
-  allowedRoleIds:    RoleId[];
-  allowedUserTypes:  UserType[];
-  visibilityScope:   VisibilityScope;
-  createdById:       string;
-  allowedDepartments?: DeptId[];
-  allowedTeamIds?:   string[];
-}): VideoItem {
-  const user = getUserById(input.createdById);
-  if (!user || !canUploadDocuments(user)) {
-    throw new Error("You are not authorized to add video content.");
-  }
 
-  const videoItem: VideoItem = {
-    id:               generateVideoId(),
-    title:            input.title,
-    description:      input.description,
-    provider:         input.provider,
-    embedUrl:         input.embedUrl,
-    thumbnail:        input.thumbnail,
-    visibilityScope:  input.visibilityScope,
-    allowedRoleIds:   input.allowedRoleIds,
-    allowedUserTypes: input.allowedUserTypes,
-    allowedDepartments: input.allowedDepartments,
-    allowedTeamIds:   input.allowedTeamIds,
-    createdById:      input.createdById,
-    updatedAt:        new Date().toISOString(),
-    pinned:           false,
-  };
-
-  api.saveVideo(videoItem);
-  return videoItem;
-}
-
-export function createVideoBlock(input: {
-  title:              string;
-  description:        string;
-  provider:           VideoProvider;
-  embedUrl:           string;
-  thumbnail?:         string;
-  timestamps?:        VideoTimestamp[];
-  transcript?:        string;
-  relatedResourceIds?: string[];
-  id?:                string;
-}) {
-  return {
-    id:                 input.id ?? `video-${Date.now()}`,
-    type:               "video" as const,
-    title:              input.title,
-    description:        input.description,
-    provider:           input.provider,
-    embedUrl:           input.embedUrl,
-    thumbnail:          input.thumbnail,
-    timestamps:         input.timestamps ?? [],
-    transcript:         input.transcript,
-    relatedResourceIds: input.relatedResourceIds,
-  };
-}
 
 // ─── Document Mutations ───────────────────────────────────────────────────────
 
-export function createDocumentUpload(document: {
+function createDocumentUpload(document: {
   title:                  string;
   description:            string;
   departmentId:           DeptId;
@@ -3069,51 +2696,7 @@ export async function replaceDocumentFile(user: User, documentId: string, file: 
   return document;
 }
 
-export function publishDocument(user: User, documentId: string): Document {
-  requireAuthenticatedUser(user);
-  requirePublishingPermission(user);
 
-  const document = getDocumentById(documentId);
-  if (!document) throw new Error("Document not found.");
-
-  document.lifecycleState = "published";
-  document.updatedAt      = formatDocumentDate();
-  document.updatedById    = user.id;
-
-  api.saveDocument(document);
-  recordActivity({
-    userId:     user.id,
-    action:     "DOCUMENT_PUBLISHED",
-    targetType: "document",
-    targetId:   document.id,
-    metadata:   { title: document.title },
-  });
-
-  return document;
-}
-
-export function archiveDocument(user: User, documentId: string): Document {
-  requireAuthenticatedUser(user);
-  requireEditingPermission(user);
-
-  const document = getDocumentById(documentId);
-  if (!document) throw new Error("Document not found.");
-
-  document.lifecycleState = "archived";
-  document.updatedAt      = formatDocumentDate();
-  document.updatedById    = user.id;
-
-  api.saveDocument(document);
-  recordActivity({
-    userId:     user.id,
-    action:     "DOCUMENT_ARCHIVED",
-    targetType: "document",
-    targetId:   document.id,
-    metadata:   { title: document.title },
-  });
-
-  return document;
-}
 
 export function updateDocumentMetadata(
   user: User,
@@ -3156,147 +2739,5 @@ export function updateDocumentMetadata(
   return document;
 }
 
-export function createDocumentVersionSnapshot(documentId: string, userId: string) {
-  const document = getDocumentById(documentId);
-  const user     = getUserById(userId);
-  requireAuthenticatedUser(user);
-  requireEditingPermission(user);
 
-  if (!document) throw new Error("Document not found.");
-
-  const versionId = generateSnapshotId(document.id);
-  const snapshot = {
-    ...document,
-    versionId,
-    snapshotAt: new Date().toISOString(),
-    snapshotBy: user!.id,
-  };
-
-  recordActivity({
-    userId:     user!.id,
-    action:     "DOCUMENT_VERSIONED",
-    targetType: "document",
-    targetId:   document.id,
-    metadata:   { snapshotId: versionId, title: document.title },
-  });
-
-  return snapshot;
-}
-
-export function createDriveDocumentReference(input: {
-  title:                  string;
-  description:            string;
-  departmentId:           DeptId;
-  authorId:               string;
-  tag:                    DocTag;
-  driveFileId:            string;
-  googleDocId:            string;
-  webViewLink:            string;
-  fileMimeType:           string;
-  ownerEmail:             string;
-  allowedRoleIds:         RoleId[];
-  allowedUserTypes:       UserType[];
-  allowedDepartments?:    DeptId[];
-  allowedDepartmentIds?:  DeptId[];
-  allowedTeamIds?:        string[];
-  visibilityScope?:       VisibilityScope;
-  source?:                DocumentSource;
-  sourceProvider?:        "googleDrive" | "localDrive";
-  driveProvider?:         "googleDrive" | "localDrive";
-  globalPinned?:          boolean;
-  mandatoryRead?:         boolean;
-  broadcastAudience?:     BroadcastAudience;
-  broadcastRoleIds?:      RoleId[];
-  broadcastDepartmentIds?: DeptId[];
-  folderId?:              string;
-  folderName?:            string;
-  linkedDocumentId?:      string;
-  documentVersionId?:     string;
-  uploadedBy?:            string;
-  permissionSummary?:     DriveDocumentPermission[];
-}): DriveDocumentReference {
-  const author = getUserById(input.authorId);
-  requireAuthenticatedUser(author);
-  requireUploadPermission(author);
-
-  if (!input.allowedRoleIds?.length) {
-    throw new Error("Drive document requires at least one allowed role.");
-  }
-
-  const normalizedUserTypes: UserType[] =
-    input.allowedUserTypes?.length
-      ? input.allowedUserTypes
-      : ([...new Set(
-          input.allowedRoleIds
-            .map((id) => getRoleById(id)?.userType)
-            .filter((t): t is UserType => !!t),
-        )] as UserType[]);
-
-  if (!normalizedUserTypes.length) {
-    throw new Error("Drive document requires at least one user type.");
-  }
-
-  const now = formatDocumentDate();
-
-  const document: DriveDocumentReference = {
-    id:               generateDriveDocumentId(),
-    title:            input.title,
-    description:      input.description,
-    departmentId:     input.departmentId,
-    dept:             getDepartmentLabel(input.departmentId),
-    tag:              input.tag,
-    allowedRoleIds:   input.allowedRoleIds,
-    allowedUserTypes: normalizedUserTypes,
-    allowedDepartments: input.allowedDepartments,
-    allowedTeamIds:   input.allowedTeamIds,
-    visibilityScope:  input.visibilityScope ?? "department",
-    globalPinned:     input.globalPinned ?? false,
-    mandatoryRead:    input.mandatoryRead ?? false,
-    broadcastAudience: input.broadcastAudience ?? "none",
-    broadcastRoleIds: input.broadcastRoleIds,
-    broadcastDepartmentIds: input.broadcastDepartmentIds,
-    readTime:         estimateReadTime(input.description),
-    authorId:         input.authorId,
-    author:           author!.name,
-    createdById:      input.authorId,
-    updatedAt:        now,
-    updatedById:      input.authorId,
-    version:          "v1.0",
-    pinned:           false,
-    source:           input.source === "uploaded" ? "local_drive" : (input.source ?? "google_drive"),
-    sourceProvider:   input.sourceProvider ?? (input.source === "uploaded" ? "localDrive" : "googleDrive"),
-    driveProvider:    input.driveProvider ?? input.sourceProvider ?? "googleDrive",
-    lifecycleState:   "uploaded",
-    driveFileId:      input.driveFileId,
-    googleDocId:      input.googleDocId,
-    webViewLink:      input.webViewLink,
-    driveUrl:         input.webViewLink,
-    fileMimeType:     input.fileMimeType,
-    ownerEmail:       input.ownerEmail,
-    folderId:         input.folderId,
-    folderName:       input.folderName,
-    linkedDocumentId: input.linkedDocumentId,
-    uploadedBy:       input.uploadedBy ?? input.authorId,
-    documentVersionId: input.documentVersionId,
-    permissionSummary: input.permissionSummary ?? [],
-    syncStatus:       "pending",
-    lastSyncedAt:     new Date().toISOString(),
-    lastDriveModifiedAt: new Date().toISOString(),
-    extractedText:    undefined,
-    parsedBlocks:     [],
-    parserStatus:     "pending",
-    parserVersion:    "1.0",
-  };
-
-  api.saveDriveDocumentReference(document);
-  recordActivity({
-    userId:     input.authorId,
-    action:     "DOCUMENT_CREATED",
-    targetType: "document",
-    targetId:   document.id,
-    metadata:   { title: document.title, source: "google_drive" },
-  });
-
-  return document;
-}
 

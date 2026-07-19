@@ -12,7 +12,6 @@ import type { LucideIcon } from "lucide-react";
 import { Search, X } from "lucide-react";
 import { S, Sp, T } from "@/styles/sharedUi";
 import { motionPreset, motionTransition } from "@/styles/motionPresets";
-import type { StatusToken } from "@/styles/statusColors";
 
 type StyledProps = { children?: ReactNode; className?: string; style?: CSSProperties };
 
@@ -39,7 +38,7 @@ export function Surface({ children, className, style, tone = "group", padding = 
   return <div className={className} style={{ ...base, padding: pad, ...style }}>{children}</div>;
 }
 
-export function HeaderBar({ children, className, style }: StyledProps) {
+function HeaderBar({ children, className, style }: StyledProps) {
   return <div className={className} style={{ minHeight: "48px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: Sp["4"], padding: `0 ${Sp["4"]}`, borderBottom: "1px solid var(--op-border)", ...style }}>{children}</div>;
 }
 
@@ -69,11 +68,6 @@ export function SearchField({ style, ...props }: InputHTMLAttributes<HTMLInputEl
   return <div style={{ position: "relative", ...style }}><Search aria-hidden="true" size={15} style={{ position: "absolute", left: Sp["3"], top: "50%", transform: "translateY(-50%)", color: "var(--op-text-3)", pointerEvents: "none" }} /><input type="search" aria-label={props["aria-label"] ?? "Search"} style={{ ...S.input, paddingLeft: "36px", height: "38px" }} {...props} /></div>;
 }
 
-export function StatusBadge({ token, label = token.label }: { token: StatusToken; label?: string }) {
-  const Icon = token.icon;
-  return <span style={{ display: "inline-flex", alignItems: "center", gap: Sp["1"], minHeight: "24px", padding: `0 ${Sp["2"]}`, borderRadius: "var(--r-full)", background: token.bg, color: token.fg, ...T.uiSmall }}><Icon size={12} />{label}</span>;
-}
-
 export function Metric({ label, value, detail, icon: Icon, color = "var(--op-text)" }: { label: string; value: ReactNode; detail?: ReactNode; icon?: LucideIcon; color?: string }) {
   return <div style={{ minWidth: 0 }}><div style={{ display: "flex", alignItems: "center", gap: Sp["2"], marginBottom: Sp["3"] }}>{Icon && <Icon size={14} color={color} />}<span style={T.sectionLabel}>{label}</span></div><div style={{ ...T.displayLg, color }}>{value}</div>{detail && <div style={{ ...T.caption, marginTop: Sp["2"] }}>{detail}</div>}</div>;
 }
@@ -99,21 +93,8 @@ export function Popover({ children, className, style }: StyledProps) {
   return <motion.div className={className} initial={motionPreset.popover.initial} animate={motionPreset.popover.animate} exit={motionPreset.popover.exit} transition={motionPreset.popover.transition} style={{ ...S.floatingPanel, padding: Sp["3"], ...style }}>{children}</motion.div>;
 }
 
-export function DataTable({ children, label, style }: { children: ReactNode; label: string; style?: CSSProperties }) {
-  return <div style={{ width: "100%", overflowX: "auto", ...style }}><table aria-label={label} style={{ width: "100%", borderCollapse: "collapse", ...T.tableCell }}>{children}</table></div>;
-}
-
 export function Matrix({ children, label, style }: { children: ReactNode; label: string; style?: CSSProperties }) {
   return <div role="grid" aria-label={label} style={{ width: "100%", overflow: "auto", borderRadius: "var(--r-lg)", background: "var(--op-surface)", ...style }}>{children}</div>;
-}
-
-export function Timeline({ children, className, style }: StyledProps) {
-  return <div className={className} style={{ display: "flex", flexDirection: "column", ...style }}>{children}</div>;
-}
-
-export function TimelineItem({ title, meta, children, token, last = false }: { title: string; meta?: ReactNode; children?: ReactNode; token?: StatusToken; last?: boolean }) {
-  const color = token?.fg ?? "var(--op-text-3)";
-  return <div style={{ display: "grid", gridTemplateColumns: "20px minmax(0,1fr)", gap: Sp["3"] }}><div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}><span style={{ width: "8px", height: "8px", marginTop: "6px", borderRadius: "50%", background: color, flexShrink: 0 }} />{!last && <span style={{ width: "1px", minHeight: Sp["8"], flex: 1, background: "var(--op-border)", marginTop: Sp["1"] }} />}</div><div style={{ paddingBottom: last ? 0 : Sp["6"] }}><div style={T.cardTitle}>{title}</div>{meta && <div style={{ ...T.caption, marginTop: Sp["1"] }}>{meta}</div>}{children && <div style={{ ...T.bodySmall, marginTop: Sp["2"] }}>{children}</div>}</div></div>;
 }
 
 export const MotionPage = motion.div;

@@ -2,22 +2,6 @@ import type { User, VisibilityScope } from "@/core/types";
 import { isAdmin } from "@/core/operon";
 import { hasVisibilityAccess } from "@/security/permissions";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-/**
- * Minimum shape required for visibility filtering.
- * Field names match the Supabase schema column names as mapped by the ORM.
- */
-export interface VisibleItem {
-  visibilityScope: VisibilityScope;
-  departmentId?: string;
-  allowedUserTypes?: string[];
-  /** Corresponds to `assigned_user_ids` in the documents/resources tables. */
-  assignedUserIds?: string[];
-  allowedDepartments?: string[];
-  allowedTeamIds?: string[];
-}
-
 // ─── Core Check ───────────────────────────────────────────────────────────────
 
 /**
@@ -57,49 +41,4 @@ export function isVisibleToUser(
   }
 
   return hasVisibilityAccess(user, visibility, departmentId, userTypes, assignedUserIds);
-}
-
-// ─── Collection Filters ───────────────────────────────────────────────────────
-
-/**
- * Filters an array of items to those visible to `user`.
- * T must satisfy VisibleItem — field names must match the schema mapping.
- */
-export function filterVisibleItems<T extends VisibleItem>(
-  user: User | null,
-  items: T[],
-): T[] {
-  // Admins see everything — skip per-item checks for performance.
-  if (user && isAdmin(user)) return items;
-
-  return items.filter((item) =>
-    isVisibleToUser(
-      user,
-      item.visibilityScope,
-      item.departmentId,
-      item.allowedUserTypes,
-      item.assignedUserIds,
-      item.allowedDepartments,
-      item.allowedTeamIds,
-    )
-  );
-}
-
-/**
- * Typed overload for Document arrays.
- * Documents use `visibility_scope` in the DB, mapped to `visibilityScope` here.
- */
-export function filterVisibleDocuments<
-  T extends VisibleItem & { id: string }
->(user: User | null, documents: T[]): T[] {
-  return filterVisibleItems(user, documents);
-}
-
-/**
- * Typed overload for Resource arrays.
- */
-export function filterVisibleResources<
-  T extends VisibleItem & { id: string }
->(user: User | null, resources: T[]): T[] {
-  return filterVisibleItems(user, resources);
 }

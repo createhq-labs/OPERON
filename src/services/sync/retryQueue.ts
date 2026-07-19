@@ -1,7 +1,5 @@
 import type { PendingUploadCacheItem } from "@/services/cache";
 
-const RETRY_QUEUE_KEY = "operon.retry.queue";
-
 type RetryRecord = {
   id: string;
   type: "pending-upload";
@@ -13,7 +11,7 @@ function readQueue(): RetryRecord[] {
   return [];
 }
 
-function writeQueue(records: RetryRecord[]) {
+function writeQueue(_records: RetryRecord[]) {
   // In production, retry queue persistence is disabled and uploads must be handled through Supabase.
 }
 
@@ -30,11 +28,3 @@ export function enqueueRetryUpload(payload: PendingUploadCacheItem) {
   writeQueue(filtered);
 }
 
-export function dequeueRetryUpload(id: string) {
-  const queue = readQueue();
-  writeQueue(queue.filter((task) => task.id !== id));
-}
-
-export function readPendingRetryUploads(): PendingUploadCacheItem[] {
-  return readQueue().map((task) => task.payload);
-}

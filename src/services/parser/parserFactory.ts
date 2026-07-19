@@ -1,11 +1,9 @@
 import type { ParserResult, DriveDocumentPayload } from "@/services/parser/types";
 import type { ParserProvider } from "@/services/parser/baseParser";
-import type { ParserHandler } from "@/services/parser/registry";
 import {
   getParserByExtension,
   getParserByMimeType,
   resolveParser,
-  listRegisteredParsers,
 } from "@/services/parser/registry";
 
 export interface ParserSelectionOptions {
@@ -94,10 +92,3 @@ export function parseDriveDocument(
   );
 }
 
-// ---------------------------------------------------------------------------
-// Registry inspection
-// ---------------------------------------------------------------------------
-
-export function listParsers(): ParserHandler[] {
-  return listRegisteredParsers();
-}

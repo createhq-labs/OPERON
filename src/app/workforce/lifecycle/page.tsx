@@ -38,7 +38,6 @@ import {
   canSubmitCreatorDeboarding,
   canViewAllHrRecords,
 } from "@/security/permissions";
-import { ROLE_IDS } from "@/core/roles";
 import { StatusPill } from "@/features/workforce/StatusPill";
 import { EmployeeProfilePanel } from "@/features/workforce/EmployeeProfilePanel";
 import { S, T } from "@/styles/sharedUi";

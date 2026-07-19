@@ -14,7 +14,7 @@ export interface WorkforceCapabilities {
   canViewInternalUsers: boolean; canAccessHr: boolean;
 }
 
-export function normalizeRoleName(value: string | null | undefined): string {
+function normalizeRoleName(value: string | null | undefined): string {
   return value?.trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ") ?? "";
 }
 

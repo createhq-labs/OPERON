@@ -12,7 +12,6 @@ import type { User } from "@/core/operon";
 import { getRoleById, getRolePermissionIds, registerLocalUser } from "@/core/operon";
 import { resolveIdentity } from "@/auth/sessionResolver";
 import { authAdapter } from "@/auth/authAdapter";
-import { requestSignupVerification, type PendingSignup } from "@/lib/workforce/signups";
 import { getSupabaseDiagnostics, resolveSupabaseAvailability } from "@/lib/supabase";
 import { DEFAULT_ROLE_ID } from "@/core/roles";
 import {
@@ -24,17 +23,16 @@ import { recordRuntimeMetric } from "@/services/observability/runtimeMetrics";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type AuthStatus = "initializing" | "authenticated" | "unauthenticated" | "failed" | "pending_verification";
+type AuthStatus = "initializing" | "authenticated" | "unauthenticated" | "failed" | "not_invited";
 
-export interface AuthState {
+interface AuthState {
   user: User | null;
   loaded: boolean;
   status: AuthStatus;
   error?: string;
-  pendingSignup: PendingSignup | null;
+  deniedEmail?: string;
   signIn: () => Promise<void>;
   signInWithPassword: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string, fullName: string) => Promise<{ requiresEmailConfirmation: boolean }>;
   signOut: () => Promise<void>;
   selectRole: (roleId: string, displayRoleName?: string) => void;
 }
@@ -115,10 +113,9 @@ const AuthContext = createContext<AuthState>({
   loaded: false,
   status: "initializing",
   error: undefined,
-  pendingSignup: null,
+  deniedEmail: undefined,
   signIn: async () => {},
   signInWithPassword: async () => {},
-  signUp: async () => ({ requiresEmailConfirmation: false }),
   signOut: async () => {},
   selectRole: () => {},
 });
@@ -130,28 +127,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [loaded, setLoaded] = useState(false);
   const [status, setStatus] = useState<AuthStatus>("initializing");
   const [error, setError] = useState<string | undefined>(undefined);
-  const [pendingSignup, setPendingSignup] = useState<PendingSignup | null>(null);
+  const [deniedEmail, setDeniedEmail] = useState<string | undefined>(undefined);
 
   const mountedRef = useRef(true);
   const subscriptionRef = useRef<{ unsubscribe: () => void } | null>(null);
-  // Guards against re-requesting HR verification on every SIGNED_IN/
-  // TOKEN_REFRESHED/USER_UPDATED event within one AuthProvider mount — the
-  // DB-level ON CONFLICT DO NOTHING makes repeats harmless, but there's no
-  // reason to round-trip on every token refresh.
-  const signupVerificationRequestedRef = useRef(false);
-
-  async function requestVerificationOnce(): Promise<PendingSignup | null> {
-    if (signupVerificationRequestedRef.current) return null;
-    signupVerificationRequestedRef.current = true;
-    try {
-      return await requestSignupVerification();
-    } catch (err) {
-      logRuntimeWarning("Signup verification request failed", {
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return null;
-    }
-  }
 
   useEffect(() => {
     mountedRef.current = true;
@@ -196,24 +175,20 @@ export function AuthProvider({ children }: PropsWithChildren) {
         return;
       }
 
-      // Authenticated with Supabase but no global.users row yet — this is a
-      // distinct state from "not signed in": register (or fetch) the pending
-      // HR-verification request and show a dedicated pending screen instead
-      // of bouncing to /login. The browser never creates/modifies
-      // global.users itself — only decide_pending_signup() does, and only
-      // after explicit HR approval.
-      if (identity.kind === "pending") {
+      // Authenticated with Supabase but no matching employee invitation —
+      // resolveIdentity() already attempted to link one (the only code
+      // path that ever writes to global.users). No queue, no waiting
+      // state: this is a hard denial, distinct from "not signed in".
+      if (identity.kind === "not_invited") {
         if (!mountedRef.current) return;
         window.clearTimeout(fallbackTimer);
-        const signup = await requestVerificationOnce();
-        if (!mountedRef.current) return;
         setUser(null);
-        setPendingSignup(signup);
-        setStatus("pending_verification");
+        setDeniedEmail(identity.email);
+        setStatus("not_invited");
         setError(undefined);
         setLoaded(true);
-        logRuntimeEvent("Auth bootstrap resolved to pending verification", {
-          authUserId: identity.authUserId,
+        logRuntimeEvent("Auth bootstrap resolved to not_invited", {
+          email: identity.email,
         });
         return;
       }
@@ -251,7 +226,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       setUser(activeUser);
       setStatus(resolvedStatus);
       setError(activeUser ? undefined : availability.reason);
-      setPendingSignup(null);
+      setDeniedEmail(undefined);
       setLoaded(true);
 
       recordRuntimeMetric(
@@ -296,28 +271,25 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
           if (currentUser?.status === "disabled") {
             setUser(null);
-            setPendingSignup(null);
+            setDeniedEmail(undefined);
             setStatus("unauthenticated");
             setError("This account has been deactivated.");
-          } else if (identity.kind === "pending") {
-            const signup = await requestVerificationOnce();
-            if (!mountedRef.current) return;
+          } else if (identity.kind === "not_invited") {
             setUser(null);
-            setPendingSignup(signup);
-            setStatus("pending_verification");
+            setDeniedEmail(identity.email);
+            setStatus("not_invited");
             setError(undefined);
           } else {
             setUser(currentUser);
-            setPendingSignup(null);
+            setDeniedEmail(undefined);
             setStatus(currentUser ? "authenticated" : "unauthenticated");
             setError(undefined);
           }
         }
 
         if (event === "SIGNED_OUT") {
-          signupVerificationRequestedRef.current = false;
           setUser(null);
-          setPendingSignup(null);
+          setDeniedEmail(undefined);
           setStatus("unauthenticated");
           setError(undefined);
         }
@@ -360,21 +332,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
     await authAdapter.signInWithPassword(email, password);
   }
 
-  async function signUp(email: string, password: string, fullName: string) {
-    clearStorage(ROLE_KEY, ROLE_LABEL_KEY);
-    setError(undefined);
-    return authAdapter.signUp(email, password, fullName);
-  }
-
   async function signOut() {
     try {
       clearStorage(ROLE_KEY, ROLE_LABEL_KEY);
       await authAdapter.signOut();
     } finally {
-      signupVerificationRequestedRef.current = false;
       if (mountedRef.current) {
         setUser(null);
-        setPendingSignup(null);
+        setDeniedEmail(undefined);
         setStatus("unauthenticated");
         setError(undefined);
       }
@@ -399,7 +364,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   return (
     <AuthContext.Provider
-      value={{ user, loaded, status, error, pendingSignup, signIn, signInWithPassword, signUp, signOut, selectRole }}
+      value={{ user, loaded, status, error, deniedEmail, signIn, signInWithPassword, signOut, selectRole }}
     >
       {children}
     </AuthContext.Provider>

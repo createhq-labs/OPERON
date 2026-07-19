@@ -1,8 +1,8 @@
-import type { DeptId, Document, DriveDocumentReference, ResourceItem, User } from "@/core/operon";
+import type { DeptId, Document, ResourceItem, User } from "@/core/operon";
 import type { SearchOptions } from "./types";
-import { buildDocumentIndex, buildDriveDocumentIndex, buildResourceIndex } from "./indexer";
+import { buildDocumentIndex, buildResourceIndex } from "./indexer";
 import { searchEntries } from "./engine";
-import { filterVisibleDocuments, filterVisibleDriveDocuments, filterVisibleResources } from "./permissions";
+import { filterVisibleDocuments, filterVisibleResources } from "./permissions";
 import { markSearchIndexDirty } from "./sync";
 import { createFallbackQuery } from "./filters";
 
@@ -22,25 +22,6 @@ export function searchDocuments(
     return results.slice((page - 1) * limit, page * limit).map((item) => item.ref);
   } catch (_error) {
     return fallbackDocumentSearch(user, documents, query, departmentId, page, limit, sort);
-  }
-}
-
-export function searchDriveDocuments(
-  user: User,
-  documents: DriveDocumentReference[],
-  query = "",
-  departmentId?: DeptId | "all",
-  page = 1,
-  limit = 20,
-  sort: SearchOptions["sort"] = "pinned"
-) {
-  try {
-    const visibleDocuments = filterVisibleDriveDocuments(user, documents);
-    const documentIndex    = buildDriveDocumentIndex(visibleDocuments);
-    const results          = searchEntries(documentIndex, query, { departmentId, sort });
-    return results.slice((page - 1) * limit, page * limit).map((item) => item.ref);
-  } catch (_error) {
-    return fallbackDriveDocumentSearch(user, documents, query, departmentId, page, limit, sort);
   }
 }
 
@@ -87,28 +68,6 @@ function fallbackDocumentSearch(
     const haystack = [
       document.title, document.description, document.dept,
       document.tag, document.extractedText, document.author,
-    ].join(" ").toLowerCase();
-    return haystack.includes(cleanQuery);
-  });
-  return sortDocuments(filtered, sort).slice((page - 1) * limit, page * limit);
-}
-
-function fallbackDriveDocumentSearch(
-  user: User,
-  documents: DriveDocumentReference[],
-  query: string,
-  departmentId?: DeptId | "all",
-  page = 1,
-  limit = 20,
-  sort: SearchOptions["sort"] = "pinned"
-) {
-  const cleanQuery       = createFallbackQuery(query);
-  const visibleDocuments = filterVisibleDriveDocuments(user, documents);
-  const filtered         = visibleDocuments.filter((document) => {
-    if (!cleanQuery) return true;
-    const haystack = [
-      document.title, document.description, document.dept,
-      document.tag, document.author, document.driveUrl,
     ].join(" ").toLowerCase();
     return haystack.includes(cleanQuery);
   });

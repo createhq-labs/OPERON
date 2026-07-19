@@ -71,14 +71,3 @@ export function getParserByExtension(
   );
 }
 
-export function getParserTypeForFile(
-  fileName: string,
-  mimeType?: string
-): ParserHandler | undefined {
-  const extension = fileName.split(".").pop()?.toLowerCase();
-  return getParserByMimeType(mimeType) ?? getParserByExtension(extension);
-}
-
-export function listRegisteredParsers(): ParserHandler[] {
-  return Array.from(parserRegistry.values());
-}

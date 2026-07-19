@@ -17,7 +17,7 @@ const ALL_TABS = [
   { id: "lifecycle",  label: "People",      href: "/workforce/lifecycle" },
   { id: "calendar",   label: "Calendar",    href: "/workforce/calendar" },
   { id: "probation",  label: "Probation",   href: "/workforce/probation" },
-  { id: "signups",    label: "Sign-ins",    href: "/workforce/signups" },
+  { id: "invitations", label: "Invitations", href: "/workforce/invitations" },
 ];
 
 // Deliberately bypasses permissions.ts's legacy canManageOnboarding() (which
@@ -42,10 +42,10 @@ export default function WorkforceLayout({ children }: { children: React.ReactNod
       || pathname?.startsWith("/workforce/onboarding")
       || pathname?.startsWith("/workforce/deboarding");
     const isProbationRoute = pathname?.startsWith("/workforce/probation");
-    const isSignupsRoute = pathname?.startsWith("/workforce/signups");
+    const isInvitationsRoute = pathname?.startsWith("/workforce/invitations");
     if (isLifecycleRoute && !canAccessPeopleModule(user)) router.replace("/workforce/calendar");
     if (isProbationRoute && !canSubmitProbationReview(user) && !canDecideProbationReview(user)) router.replace("/workforce/calendar");
-    if (isSignupsRoute && !canManageOnboardingCapability(user)) router.replace("/workforce/calendar");
+    if (isInvitationsRoute && !canManageOnboardingCapability(user)) router.replace("/workforce/calendar");
   }, [loaded, user, router, pathname]);
 
   if (!loaded) return null;
@@ -53,12 +53,12 @@ export default function WorkforceLayout({ children }: { children: React.ReactNod
 
   const showLifecycle = canAccessPeopleModule(user);
   const showProbation = canSubmitProbationReview(user) || canDecideProbationReview(user);
-  const showSignups = canManageOnboardingCapability(user);
+  const showInvitations = canManageOnboardingCapability(user);
 
   const tabs = ALL_TABS.filter((tab) => {
     if (tab.id === "lifecycle") return showLifecycle;
     if (tab.id === "probation") return showProbation;
-    if (tab.id === "signups") return showSignups;
+    if (tab.id === "invitations") return showInvitations;
     return true;
   });
 

@@ -98,7 +98,7 @@ export function encryptValue(value: string) {
   return `${iv.toString("base64")}.${tag.toString("base64")}.${encrypted.toString("base64")}`;
 }
 
-export function decryptValue(payload: string) {
+function decryptValue(payload: string) {
   const [ivB64, tagB64, encryptedB64] = payload.split(".");
   if (!ivB64 || !tagB64 || !encryptedB64) {
     throw new Error("Invalid encrypted payload");
@@ -170,7 +170,7 @@ export async function exchangeGoogleOAuthCode(code: string): Promise<GoogleOAuth
   };
 }
 
-export async function refreshGoogleAccessToken(refreshToken: string): Promise<GoogleOAuthTokens> {
+async function refreshGoogleAccessToken(refreshToken: string): Promise<GoogleOAuthTokens> {
   if (!GOOGLE_DRIVE_CLIENT_ID || !GOOGLE_DRIVE_CLIENT_SECRET) {
     throw new Error("Google Drive OAuth is not configured.");
   }
@@ -266,7 +266,7 @@ export async function fetchGoogleDocsDocument(accessToken: string, documentId: s
   return response.json();
 }
 
-export async function downloadDriveFileBytes(accessToken: string, fileId: string, exportMimeType?: string) {
+async function downloadDriveFileBytes(accessToken: string, fileId: string, exportMimeType?: string) {
   const isGoogleAppFile = Boolean(exportMimeType);
   const url = isGoogleAppFile
     ? `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}/export?mimeType=${encodeURIComponent(exportMimeType ?? "text/plain")}`
@@ -306,7 +306,7 @@ export function determineParserType(mimeType: string) {
   return "plainText";
 }
 
-export function chooseExportMimeType(mimeType: string) {
+function chooseExportMimeType(mimeType: string) {
   if (mimeType === "application/vnd.google-apps.spreadsheet") return "text/csv";
   if (mimeType === "application/vnd.google-apps.presentation") return "text/plain";
   if (mimeType === "application/vnd.google-apps.document") return "text/plain";
@@ -400,32 +400,6 @@ export async function createDriveWatchSubscription(
   return response.json();
 }
 
-export function buildDriveAccountPayload(account: {
-  userId: string;
-  googleAccountId: string;
-  email: string;
-  displayName: string;
-  tokens: GoogleOAuthTokens;
-}) {
-  const now = new Date().toISOString();
-  const expiresAt = new Date(Date.now() + account.tokens.expiresIn * 1000).toISOString();
-  return {
-    id: `drive-account-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    legacy_id: `drive-account-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    user_legacy_id: account.userId,
-    google_account_id: account.googleAccountId,
-    email: account.email,
-    display_name: account.displayName,
-    access_token_encrypted: encryptValue(account.tokens.accessToken),
-    refresh_token_encrypted: account.tokens.refreshToken ? encryptValue(account.tokens.refreshToken) : "",
-    expires_at: expiresAt,
-    scopes: account.tokens.scope.split(" "),
-    active: true,
-    created_at: now,
-    updated_at: now,
-  };
-}
-
 export async function saveDriveAccount(account: GoogleDriveAccount) {
   if (!supabaseAdmin) return account;
   const result = await supabaseAdmin.from("drive_accounts").upsert(account, { onConflict: "legacy_id" });
@@ -442,15 +416,6 @@ export async function findDriveAccounts(userId: string) {
     throw new Error(error.message);
   }
   return (data ?? []) as GoogleDriveAccount[];
-}
-
-export async function findDriveAccountById(accountId: string) {
-  if (!supabaseAdmin) return null;
-  const { data, error } = await supabaseAdmin.from("drive_accounts").select("*").eq("legacy_id", accountId).single();
-  if (error) {
-    throw new Error(error.message);
-  }
-  return (data ?? null) as GoogleDriveAccount | null;
 }
 
 export async function deactivateDriveAccount(accountId: string) {
@@ -510,6 +475,3 @@ export function getCallbackStateCookieName() {
   return "drive_oauth_state";
 }
 
-export function getDriveWebhookChannelToken(userId: string) {
-  return `drive-${userId}-${crypto.randomBytes(8).toString("hex")}`;
-}

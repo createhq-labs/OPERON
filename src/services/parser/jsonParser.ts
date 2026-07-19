@@ -7,7 +7,6 @@ export function parseJsonDocument(rawJson: string, fileName: string): ParserResu
     const metadata: Record<string, unknown> = { sourceType: "json" };
 
     if (Array.isArray(parsed)) {
-      const rows = parsed.map((item) => (typeof item === "object" ? JSON.stringify(item) : String(item)));
       blocks.push({ type: "table", content: { rows: [Object.keys(parsed[0] ?? {}), ...parsed.map((item) => Object.values(item ?? {}).map((value) => String(value)))] } });
       metadata.recordCount = parsed.length;
     } else if (typeof parsed === "object" && parsed !== null) {

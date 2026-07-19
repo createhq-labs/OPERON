@@ -3,8 +3,7 @@
 // Mirrors the live public.user_role Postgres enum exactly (5 values) — the
 // app previously had its own 16-role catalog, remapped down to this set so
 // identity can live directly on the Finance Dashboard's public.users table
-// instead of a parallel one. See supabase-migrations/010_hr_domain_on_public_users.sql
-// for the full mapping and what separation-of-duties is lost as a result
+// instead of a parallel one. Separation-of-duties is lost as a result
 // (HR and Cofounder both become "admin").
 // Never change these values — they are persisted in Supabase and localStorage.
 // ─────────────────────────────────────────────────────────────────────────────

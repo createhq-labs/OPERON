@@ -125,7 +125,7 @@ export async function runIngestionPipeline(job: IngestionJob): Promise<Ingestion
   }
 }
 
-export function createFallbackIngestionFailure(
+function createFallbackIngestionFailure(
   job: IngestionJob,
   error: unknown
 ): IngestionFailure {
@@ -140,4 +140,4 @@ export function createFallbackIngestionFailure(
     rawError:      failureReason,
     failureAt:     new Date().toISOString(),
   };
-}
+}

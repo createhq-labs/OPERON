@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AttendanceDayStatus, AttendanceRecord, User } from "@/core/operon";
 import { useSession } from "@/auth/useSession";
 import {

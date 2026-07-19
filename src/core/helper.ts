@@ -29,7 +29,7 @@ export const EMPTY_ROLE_PERMISSIONS: RolePermissions = {
  * Used when resolving inherited permissions: the child must satisfy both its own
  * policy and its parent's to be granted a permission.
  */
-export function mergePermissions(base: RolePermissions, next: RolePermissions): RolePermissions {
+function mergePermissions(base: RolePermissions, next: RolePermissions): RolePermissions {
   return {
     documents: {
       create: base.documents.create && next.documents.create,
@@ -70,6 +70,7 @@ export function mergePermissions(base: RolePermissions, next: RolePermissions): 
     },
   };
 }
+
 
 /**
  * Resolves the effective permissions for a role, walking up any inheritance
@@ -339,10 +340,6 @@ export function generateDocumentId(): string {
 }
 
 /** Generates a Drive document reference ID. */
-export function generateDriveDocumentId(): string {
-  return `drive-${Date.now()}`;
-}
-
 /** Generates an activity event ID. */
 export function generateActivityId(): string {
   return `act_${Date.now()}`;
@@ -353,30 +350,14 @@ export function generateUserId(): string {
   return crypto.randomUUID();
 }
 
-/** Generates a video item ID. */
-export function generateVideoId(): string {
-  return `video_${Date.now()}`;
-}
-
 /** Generates a resource ID. */
 export function generateResourceId(): string {
   return `res_${Date.now()}`;
 }
 
-/** Generates a version snapshot ID. */
-export function generateSnapshotId(documentId: string): string {
-  return `snapshot-${documentId}-${Date.now()}`;
-}
-
-// The hr_* tables live on real uuid primary keys (public.hr_onboarding etc,
-// see supabase-migrations/010_hr_domain_on_public_users.sql) — these all
-// generate real uuids, not prefixed strings, so a client-created record's id
-// is already valid to write directly into a uuid PK column.
-
-/** Generates an onboarding record ID. */
-export function generateOnboardingId(): string {
-  return crypto.randomUUID();
-}
+// HR records use real uuid primary keys, not prefixed strings, so a
+// client-created record's id is already valid to write directly into a
+// uuid PK column.
 
 /** Generates a leave request ID. */
 export function generateLeaveRequestId(): string {

@@ -5,22 +5,16 @@ import type {
   Document,
   DocTag,
   DriveDocumentReference,
-  DriveDocumentPermission,
   GoogleDocsApiDocument,
-  QuickActionItem,
   ResourceItem,
   Role,
   RoleId,
   Team,
   User,
-  UserType,
   UserStatus,
-  VideoItem,
   OnboardingRecord,
   LeaveRequest,
-  LeaveBalance,
   AttendanceRecord,
-  AttendanceAuditEntry,
   Holiday,
   ProbationRecord,
   ProbationNote,
@@ -39,7 +33,7 @@ import { enqueueRetryUpload } from "@/services/sync/retryQueue";
 import type { IngestionJob, IngestionResult, IngestionFailure } from "@/services/ingestion/types";
 
 export type DataProviderMode = "local" | "supabase";
-export type ProviderHealthStatus = "connected" | "degraded" | "offline" | "fallback";
+type ProviderHealthStatus = "connected" | "degraded" | "offline" | "fallback";
 
 export interface ProviderHealth {
   status: ProviderHealthStatus;
@@ -63,10 +57,9 @@ export interface ProviderHealth {
  * the per-store comments near reconcileSupabaseData()/hydrateSupabaseCache().
  *
  * Identity lives directly on the Finance Dashboard's real public.users table
- * (not a parallel one) — see supabase-migrations/010_hr_domain_on_public_users.sql.
- * This is the SAME table src/services/documentPlatform.ts's `workforce` schema
- * already resolves identity against, just a different set of columns/tables
- * layered on top of it.
+ * (not a parallel one). This is the SAME table src/services/documentPlatform.ts's
+ * `workforce` schema already resolves identity against, just a different set
+ * of columns/tables layered on top of it.
  */
 const configuredForSupabase = isSupabaseConfiguredLib();
 const productionEnforceSupabase = process.env.NODE_ENV === "production";
@@ -82,7 +75,7 @@ if (!configuredForSupabase) {
   );
 }
 
-export function isSupabaseConfigured() {
+function isSupabaseConfigured() {
   return isSupabaseConfiguredLib();
 }
 
@@ -94,11 +87,11 @@ function isSupabaseAvailable() {
   return shouldUseSupabase() && supabaseAvailable;
 }
 
-export function getDataProviderMode() {
+function getDataProviderMode() {
   return dataProviderMode;
 }
 
-export function getEffectiveDataProviderMode() {
+function getEffectiveDataProviderMode() {
   return dataProviderMode;
 }
 
@@ -181,29 +174,6 @@ function safeSupabaseWrite(operation: () => unknown) {
       }
     })
     .catch(handleSupabaseError);
-}
-
-async function safeFetchSupabaseTable(table: string) {
-  type FetchResult = { data: Record<string, unknown>[] | null; error: { message: string } | null };
-  const fallback: FetchResult = { data: [], error: { message: "Supabase table fetch timed out." } };
-  try {
-    const result = await withTimeout(
-      supabase.from(table).select("*").limit(1000) as unknown as Promise<FetchResult>,
-      DATA_HYDRATION_TIMEOUT_MS,
-      fallback
-    );
-
-    if (result.error || !Array.isArray(result.data)) {
-      if (result.error) {
-        console.warn(`Supabase optional table fetch failed for '${table}'`, result.error);
-      }
-      return null;
-    }
-    return result.data;
-  } catch (error) {
-    console.warn(`Supabase optional table fetch failed for '${table}'`, error);
-    return null;
-  }
 }
 
 function createUpsertPayload<T extends { id: string }>(payload: T) {
@@ -510,13 +480,9 @@ export function getProviderHealth() {
   return getProviderHealthState();
 }
 
-export function isSyncAvailable() {
-  return supabaseAvailable;
-}
 
 // Mirrors the live 5-value public.user_role enum. The former 16-role catalog
-// collapsed into these — see supabase-migrations/010_hr_domain_on_public_users.sql
-// for the full mapping and what separation-of-duties/granularity was lost.
+// collapsed into these, losing separation-of-duties/granularity in the process.
 // Each role's permissions are the union of every legacy role that merged
 // into it (a merge never removes a capability a constituent role had).
 // `userType` here is vestigial (creator-vs-employee is now User.userType,
@@ -847,8 +813,6 @@ const documentStore: Document[] = [...DOCUMENTS];
 const DRIVE_DOCUMENT_REFS: DriveDocumentReference[] = [];
 
 const driveDocumentStore: DriveDocumentReference[] = [...DRIVE_DOCUMENT_REFS];
-const videoStore: VideoItem[] = [];
-const quickActionStore: QuickActionItem[] = [];
 const resourceStore: ResourceItem[] = [...RESOURCES];
 const activityStore: ActivityEvent[] = [...ACTIVITY_LOG];
 const ingestionJobStore: IngestionJob[] = [];
@@ -856,9 +820,7 @@ const ingestionResultStore: IngestionResult[] = [];
 const ingestionFailureStore: IngestionFailure[] = [];
 const hrOnboardingStore: OnboardingRecord[] = [];
 const hrLeaveRequestStore: LeaveRequest[] = [];
-const hrLeaveBalanceStore: LeaveBalance[] = [];
 const hrAttendanceStore: AttendanceRecord[] = [];
-const hrAttendanceAuditStore: AttendanceAuditEntry[] = [];
 const hrHolidayStore: Holiday[] = [];
 const hrProbationStore: ProbationRecord[] = [];
 const hrProbationNoteStore: ProbationNote[] = [];
@@ -868,12 +830,10 @@ const notificationStore: Notification[] = [];
 
 let supabaseHydrationStarted = false;
 let supabaseHydrationComplete = false;
-let dataChangeVersion = 0;
 const dataChangeListeners: Array<() => void> = [];
 const hydrationListeners: Array<() => void> = [];
 
 function notifyDataChange() {
-  dataChangeVersion += 1;
   dataChangeListeners.slice().forEach((listener) => listener());
 }
 
@@ -1008,14 +968,6 @@ function ensureSupabaseHydration() {
   void hydrateSupabaseCache();
 }
 
-export function getSupabaseHydrationState() {
-  ensureSupabaseHydration();
-  return {
-    ready: supabaseHydrationComplete,
-    available: supabaseAvailable,
-    version: dataChangeVersion,
-  };
-}
 
 export function onSupabaseHydrated(callback: () => void) {
   ensureSupabaseHydration();
@@ -1126,10 +1078,6 @@ export function registerLocalUser(user: User) {
   return user;
 }
 
-export function getUserByRoleId(roleId: RoleId) {
-  ensureSupabaseHydration();
-  return userStore.find((user) => user.roleId === roleId);
-}
 
 export function getDocuments() {
   ensureSupabaseHydration();
@@ -1183,17 +1131,6 @@ export function updateDriveDocumentSyncMetadata(
   return document;
 }
 
-export function updateDriveDocumentPermissions(id: string, permissionSummary: DriveDocumentPermission[]) {
-  const document = getDriveDocumentById(id);
-  if (!document) return undefined;
-  document.permissionSummary = permissionSummary;
-
-  if (isSupabaseAvailable()) {
-    void safeSupabaseWrite(() => supabase.from("drive_documents").update({ permission_summary: permissionSummary }).eq("legacy_id", id));
-  }
-  notifyDataChange();
-  return document;
-}
 
 export async function fetchGoogleDocsApiDocument(googleDocId: string): Promise<GoogleDocsApiDocument> {
   const response = await fetch(`/api/drive?action=docs&docId=${encodeURIComponent(googleDocId)}`, {
@@ -1292,17 +1229,17 @@ export function getIngestionJobs() {
   return ingestionJobStore;
 }
 
-export function getIngestionJobById(id: string) {
+function getIngestionJobById(id: string) {
   ensureSupabaseHydration();
   return ingestionJobStore.find((job) => job.id === id);
 }
 
-export function getIngestionResults() {
+function getIngestionResults() {
   ensureSupabaseHydration();
   return ingestionResultStore;
 }
 
-export function getIngestionFailures() {
+function getIngestionFailures() {
   ensureSupabaseHydration();
   return ingestionFailureStore;
 }
@@ -1514,83 +1451,18 @@ export function saveNotification(notification: Notification) {
 
 // ─── Leave Balances ──────────────────────────────────────────────────────────
 
-export function getLeaveBalances(): LeaveBalance[] {
-  ensureSupabaseHydration();
-  return hrLeaveBalanceStore;
-}
 
-export function getLeaveBalanceById(id: string): LeaveBalance | undefined {
-  return hrLeaveBalanceStore.find((b) => b.id === id);
-}
 
-export function getLeaveBalancesForUser(userId: string): LeaveBalance[] {
-  ensureSupabaseHydration();
-  return hrLeaveBalanceStore.filter((b) => b.userId === userId);
-}
 
-export function saveLeaveBalance(balance: LeaveBalance): LeaveBalance {
-  const existing = hrLeaveBalanceStore.find((b) => b.id === balance.id);
-  if (existing) {
-    Object.assign(existing, balance);
-  } else {
-    hrLeaveBalanceStore.unshift(balance);
-  }
-  if (isSupabaseAvailable()) {
-    void safeSupabaseWrite(() =>
-      supabase.from("hr_leave_balances").upsert(
-        { legacy_id: balance.id, user_legacy_id: balance.userId, year: balance.year, leave_type: balance.leaveType, total_allocated: balance.totalAllocated, used: balance.used, updated_at: balance.updatedAt },
-        { onConflict: "legacy_id" },
-      ),
-    );
-  }
-  notifyDataChange();
-  return existing ?? balance;
-}
 
 // ─── Attendance Audit ────────────────────────────────────────────────────────
 
-export function getAttendanceAuditEntries(): AttendanceAuditEntry[] {
-  ensureSupabaseHydration();
-  return hrAttendanceAuditStore;
-}
 
-export function getAttendanceAuditForRecord(recordId: string): AttendanceAuditEntry[] {
-  ensureSupabaseHydration();
-  return hrAttendanceAuditStore.filter((e) => e.attendanceRecordId === recordId);
-}
 
-export function saveAttendanceAuditEntry(entry: AttendanceAuditEntry): AttendanceAuditEntry {
-  hrAttendanceAuditStore.unshift(entry);
-  if (isSupabaseAvailable()) {
-    void safeSupabaseWrite(() =>
-      supabase.from("hr_attendance_audit").insert({
-        legacy_id:            entry.id,
-        attendance_record_id: entry.attendanceRecordId,
-        user_legacy_id:       entry.userId,
-        changed_by_id:        entry.changedById,
-        date:                 entry.date,
-        previous_status:      entry.previousStatus,
-        new_status:           entry.newStatus,
-        reason:               entry.reason,
-        created_at:           entry.createdAt,
-      }),
-    );
-  }
-  notifyDataChange();
-  return entry;
-}
 
 // ─── Probation Notes ─────────────────────────────────────────────────────────
 
-export function getProbationNotes(): ProbationNote[] {
-  ensureSupabaseHydration();
-  return hrProbationNoteStore;
-}
 
-export function getProbationNotesForRecord(recordId: string): ProbationNote[] {
-  ensureSupabaseHydration();
-  return hrProbationNoteStore.filter((n) => n.probationRecordId === recordId);
-}
 
 export function saveProbationNote(note: ProbationNote): ProbationNote {
   hrProbationNoteStore.unshift(note);
@@ -1622,69 +1494,10 @@ export function deleteHoliday(holidayId: string) {
   return true;
 }
 
-export function getVideos() {
-  ensureSupabaseHydration();
-  return videoStore;
-}
 
-export function getQuickActions() {
-  ensureSupabaseHydration();
-  return quickActionStore;
-}
 
-export function saveVideo(video: VideoItem) {
-  const existing = getVideos().find((item) => item.id === video.id);
-  if (existing) {
-    Object.assign(existing, video);
-  } else {
-    videoStore.unshift(video);
-  }
 
-  if (isSupabaseAvailable()) {
-    void safeSupabaseWrite(() => supabase.from("videos").upsert(createUpsertPayload(video), { onConflict: "legacy_id" }));
-  }
-  notifyDataChange();
-  return existing || video;
-}
 
-export function saveQuickAction(action: QuickActionItem) {
-  const existing = getQuickActions().find((item) => item.id === action.id);
-  if (existing) {
-    Object.assign(existing, action);
-  } else {
-    quickActionStore.unshift(action);
-  }
-
-  if (isSupabaseAvailable()) {
-    void safeSupabaseWrite(() => supabase.from("quick_actions").upsert(createUpsertPayload(action), { onConflict: "legacy_id" }));
-  }
-  notifyDataChange();
-  return existing || action;
-}
-
-export function deleteVideo(videoId: string) {
-  const index = videoStore.findIndex((item) => item.id === videoId);
-  if (index === -1) return false;
-  videoStore.splice(index, 1);
-
-  if (isSupabaseAvailable()) {
-    void safeSupabaseWrite(() => supabase.from("videos").delete().eq("legacy_id", videoId));
-  }
-  notifyDataChange();
-  return true;
-}
-
-export function deleteQuickAction(actionId: string) {
-  const index = quickActionStore.findIndex((item) => item.id === actionId);
-  if (index === -1) return false;
-  quickActionStore.splice(index, 1);
-
-  if (isSupabaseAvailable()) {
-    void safeSupabaseWrite(() => supabase.from("quick_actions").delete().eq("legacy_id", actionId));
-  }
-  notifyDataChange();
-  return true;
-}
 
 export async function saveUploadFileToStorage(
   file: File,
@@ -1781,22 +1594,7 @@ export async function saveUploadFileToStorage(
   };
 }
 
-export function getPendingUploads() {
-  return pendingUploadStore;
-}
 
-export async function syncPendingLocalChanges() {
-  const connected = await checkSupabaseConnectivity();
-  if (!connected) {
-    supabaseAvailable = false;
-    return false;
-  }
-
-  supabaseAvailable = true;
-  await reconcileSupabaseData();
-  notifyDataChange();
-  return true;
-}
 
 export function saveUser(user: User) {
   const existing = getUserById(user.id);
@@ -1813,14 +1611,3 @@ export function saveUser(user: User) {
   return existing || user;
 }
 
-export function deleteResource(resourceId: string) {
-  const index = resourceStore.findIndex((resource) => resource.id === resourceId);
-  if (index === -1) return false;
-  resourceStore.splice(index, 1);
-
-  if (isSupabaseAvailable()) {
-    // Hard deletion is intentionally disabled; archive through workforce.archive_resource.
-  }
-  notifyDataChange();
-  return true;
-}

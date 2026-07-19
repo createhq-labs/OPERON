@@ -2,15 +2,12 @@ import type { User, VisibilityScope } from "@/core/types";
 import { hasPermission, isAdmin } from "@/core/operon";
 import {
   DRIVE_MANAGER_ROLES,
-  RESOURCE_MANAGER_ROLES,
   USER_MANAGER_ROLES,
-  ROLE_MANAGER_ROLES,
   TL_ROLES,
   HR_ONLY_ROLES,
   FOUNDER_TIER_ROLES,
   WORKFORCE_ADMIN_ROLES,
 } from "@/security/rolePolicies";
-import { ROLE_IDS } from "@/core/roles";
 import { capabilitiesFor } from "@/lib/workforce/capabilities";
 
 function workforceCapabilities(user: User) {
@@ -23,7 +20,7 @@ export function canEditDocument(user: User | null | undefined): boolean {
   return Boolean(user && workforceCapabilities(user).canManageContent);
 }
 
-export function canDeleteDocument(user: User | null | undefined): boolean {
+export function canDeleteDocument(_user: User | null | undefined): boolean {
   return false;
 }
 
@@ -35,8 +32,7 @@ export function canUploadDocument(user: User | null | undefined): boolean {
 
 /**
  * Whether the user may create, edit, or delete resource entries.
- * Derived from the RESOURCE_MANAGER_ROLES policy set — does not conflate
- * with role management permissions.
+ * Does not conflate with role management permissions.
  */
 export function canManageResources(user: User | null | undefined): boolean {
   if (!user) return false;
@@ -51,25 +47,12 @@ export function canViewResources(user: User | null | undefined): boolean {
 
 /**
  * Whether the user may create, edit, or deactivate other users.
- * Separate from canManageRoles — user management does not imply role management.
  */
 export function canManageUsers(user: User | null | undefined): boolean {
   if (!user) return false;
   return (
     hasPermission(user, "manage_users") ||
     USER_MANAGER_ROLES.has(user.roleId as never)
-  );
-}
-
-/**
- * Whether the user may define or modify the role registry.
- * Narrower than canManageUsers — only platform owners may change what roles exist.
- */
-export function canManageRoles(user: User | null | undefined): boolean {
-  if (!user) return false;
-  return (
-    hasPermission(user, "manage_roles") ||
-    ROLE_MANAGER_ROLES.has(user.roleId as never)
   );
 }
 
@@ -155,30 +138,12 @@ export function canDecideProbationReview(user: User | null | undefined): boolean
   return workforceCapabilities(user).canFinalizeProbation;
 }
 
-export function canAcknowledgeDeboarding(user: User | null | undefined): boolean {
-  if (!user) return false;
-  return (
-    hasPermission(user, "acknowledge_deboarding") ||
-    HR_ONLY_ROLES.has(user.roleId as never) ||
-    FOUNDER_TIER_ROLES.has(user.roleId as never)
-  );
-}
-
 /** Employee-track deboarding requires Co-Founder/Admin approval before HR can complete it. */
 export function canApproveDeboardingEmployeeTrack(user: User | null | undefined): boolean {
   if (!user) return false;
   return hasPermission(user, "approve_deboarding_employee_track") || FOUNDER_TIER_ROLES.has(user.roleId as never);
 }
 
-/** Whether the user can flag deboarding for anyone, not just their own direct reports. */
-export function canFlagDeboardingAny(user: User | null | undefined): boolean {
-  if (!user) return false;
-  return (
-    hasPermission(user, "flag_deboarding_any") ||
-    HR_ONLY_ROLES.has(user.roleId as never) ||
-    FOUNDER_TIER_ROLES.has(user.roleId as never)
-  );
-}
 
 /** Whether the user can view their direct reports' full leave/WFH history, not just the live approval queue. */
 export function canViewTeamLeaveHistory(user: User | null | undefined): boolean {
@@ -264,15 +229,6 @@ export function canInitiateEmployeeDeboarding(user: User | null | undefined): bo
 export function canAccessWorkforce(user: User | null | undefined): boolean {
   if (!user) return false;
   return !workforceCapabilities(user).isCreator;
-}
-
-/**
- * Full workforce management — Lifecycle, Calendar, and Probation.
- * Team members and Interns get Calendar-only; they fail this check.
- */
-export function canAccessLifecycle(user: User | null | undefined): boolean {
-  if (!user) return false;
-  return workforceCapabilities(user).canManageEmployment;
 }
 
 // ─── Visibility Access ────────────────────────────────────────────────────────

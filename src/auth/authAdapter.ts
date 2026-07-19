@@ -18,27 +18,28 @@ const AUTH_TIMEOUT_MS = 5000;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export interface AuthSession {
+interface AuthSession {
   userId: string;
   email: string;
   provider?: string;
   expiresAt?: string;
 }
 
-export interface AuthSubscription {
+interface AuthSubscription {
   unsubscribe(): void;
 }
 
 /**
  * Tri-state identity result — distinguishes "no session at all" from
- * "authenticated with Supabase but no global.users row exists yet" (which
- * getCurrentUser() alone collapses to the same `null` as "not signed in",
- * losing the information authContext needs to show a pending-verification
- * screen instead of bouncing straight to /login).
+ * "authenticated with Supabase but no global.users row exists, and no
+ * employee invitation matched this email either" (which getCurrentUser()
+ * alone collapses to the same `null` as "not signed in", losing the
+ * information authContext needs to show a clear "contact HR" denial
+ * instead of silently bouncing to /login).
  */
 export type IdentityResult =
   | { kind: "authenticated"; user: User }
-  | { kind: "pending"; authUserId: string; email: string }
+  | { kind: "not_invited"; email: string }
   | { kind: "none" };
 
 export interface AuthAdapter {
@@ -47,7 +48,6 @@ export interface AuthAdapter {
   resolveIdentity(): Promise<IdentityResult>;
   signIn(): Promise<void>;
   signInWithPassword(email: string, password: string): Promise<void>;
-  signUp(email: string, password: string, fullName: string): Promise<{ requiresEmailConfirmation: boolean }>;
   signOut(): Promise<void>;
   onAuthStateChange(
     callback: (event: string, session: unknown) => void
@@ -87,7 +87,7 @@ function appRoleFromGlobalRole(value: unknown): string {
 
 // ─── Supabase Auth Adapter ────────────────────────────────────────────────────
 
-export class SupabaseAuthAdapter implements AuthAdapter {
+class SupabaseAuthAdapter implements AuthAdapter {
   async getSession(): Promise<AuthSession | null> {
     if (!isSupabaseConfigured()) return null;
 
@@ -196,48 +196,66 @@ export class SupabaseAuthAdapter implements AuthAdapter {
     return result.kind === "authenticated" ? result.user : null;
   }
 
+  /**
+   * Looks up an existing global.users profile by auth user ID. Must filter
+   * on status='active' — a non-active row (e.g. a disabled account) must
+   * never resolve as a fully authorized user here. This mirrors the same
+   * filter getBootstrapUser() already applies.
+   */
+  private async lookupProfile(authUserId: string): Promise<User | null> {
+    const { data: existing, error: selectError } = await withTimeout(
+      supabase
+        .schema("global")
+        .from("users")
+        .select("*, role:roles(name)")
+        .eq("id", authUserId)
+        .eq("status", "active")
+        .maybeSingle(),
+      AUTH_TIMEOUT_MS,
+      { data: null, error: { code: "AUTH_TIMEOUT", message: "User profile lookup timed out." } } as never,
+    );
+
+    if (selectError) {
+      logRuntimeWarning("Failed to query user profile", { error: selectError });
+    }
+
+    return existing ? this.mapSupabaseUser(existing as Record<string, unknown>) : null;
+  }
+
   async resolveIdentity(): Promise<IdentityResult> {
     try {
       const session = await this.getSession();
 
       if (session?.userId && session.email) {
-        // 1. Look up existing profile by auth user ID. Must filter on
-        // status='active' — a non-active global.users row (e.g. a pending
-        // signup once provisioned-but-not-yet-active, or a disabled account)
-        // must never resolve as a fully authorized user here. This mirrors
-        // the same filter getBootstrapUser() and lib/workforce/auth.ts's
-        // getCurrentGlobalUser() already apply.
-        const { data: existing, error: selectError } = await withTimeout(
-          supabase
-            .schema("global")
-            .from("users")
-            .select("*, role:roles(name)")
-            .eq("id", session.userId)
-            .eq("status", "active")
-            .maybeSingle(),
-          AUTH_TIMEOUT_MS,
-          { data: null, error: { code: "AUTH_TIMEOUT", message: "User profile lookup timed out." } } as never,
-        );
-
-        if (selectError) {
-          logRuntimeWarning("Failed to query user profile", {
-            error: selectError,
-          });
-        }
+        const existing = await this.lookupProfile(session.userId);
 
         if (existing) {
-          return { kind: "authenticated", user: this.mapSupabaseUser(existing as Record<string, unknown>) };
+          return { kind: "authenticated", user: existing };
         }
 
-        // Profile provisioning belongs to the global identity system. The
-        // browser must never create an identity/RBAC row itself — but it
-        // does need to know "authenticated, awaiting HR verification" is a
-        // distinct state from "not signed in", so the caller can show a
-        // pending screen instead of bouncing to /login.
-        logRuntimeWarning("Authenticated account is awaiting global.users provisioning", {
-          userId: session.userId,
-        });
-        return { kind: "pending", authUserId: session.userId, email: session.email };
+        // No global.users row yet. Self-signup isn't supported — the only
+        // way in is a matching HR-created invitation. This is the ONLY
+        // code path that ever writes to global.users, and it only ever
+        // acts on this session's own identity (auth.uid()), never a
+        // client-supplied target.
+        const { data: linked, error: consumeError } = await withTimeout(
+          supabase.schema("workforce").rpc("consume_employee_invitation"),
+          AUTH_TIMEOUT_MS,
+          { data: null, error: { code: "AUTH_TIMEOUT", message: "Invitation check timed out." } } as never,
+        );
+
+        if (consumeError) {
+          logRuntimeWarning("Failed to check employee invitation", { error: consumeError });
+        }
+
+        if (linked) {
+          const provisioned = await this.lookupProfile(session.userId);
+          if (provisioned) {
+            return { kind: "authenticated", user: provisioned };
+          }
+        }
+
+        return { kind: "not_invited", email: session.email };
       }
 
       // No real session — fall back to bootstrap mode (dev only).
@@ -286,17 +304,6 @@ export class SupabaseAuthAdapter implements AuthAdapter {
       password,
     });
     if (error) throw new Error(error.message);
-  }
-
-  async signUp(email: string, password: string, fullName: string): Promise<{ requiresEmailConfirmation: boolean }> {
-    if (!isSupabaseConfigured()) throw new Error("Supabase is not configured.");
-    const { data, error } = await supabase.auth.signUp({
-      email: normalizeEmail(email),
-      password,
-      options: { data: { full_name: fullName.trim() } },
-    });
-    if (error) throw new Error(error.message);
-    return { requiresEmailConfirmation: !data.session };
   }
 
   async signOut(): Promise<void> {

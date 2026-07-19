@@ -18,8 +18,3 @@ export async function workforceRpc<T>(name: string, args: Record<string, unknown
   if (error) throw new WorkforceDataError(name, error);
   return data as T;
 }
-
-export function requireValue<T>(value: T | null | undefined, label: string): T {
-  if (value == null) throw new WorkforceDataError(label, { message: "No accessible record was returned." });
-  return value;
-}

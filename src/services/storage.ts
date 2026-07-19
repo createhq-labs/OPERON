@@ -1,9 +1,8 @@
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { logWarning } from "@/services/logger";
 export type { StorageProvider } from "@/services/storage/provider";
-export { createSupabaseStorageProvider } from "@/services/storage/supabaseProvider";
 
-export const STORAGE_BUCKETS = {
+const STORAGE_BUCKETS = {
   documents: "documents",
   hr: "hr",
   finance: "finance",
@@ -28,7 +27,7 @@ export interface StorageUploadMetadata {
   ingestionSource?: string;
 }
 
-export const ALLOWED_UPLOAD_MIME_TYPES = [
+const ALLOWED_UPLOAD_MIME_TYPES = [
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "text/plain",
@@ -57,15 +56,7 @@ export function isAllowedUploadMimeType(mimeType: string) {
   return ALLOWED_UPLOAD_MIME_TYPES.includes(mimeType.toLowerCase());
 }
 
-export function getPreviewType(mimeType: string) {
-  if (mimeType.startsWith("image/")) return "image";
-  if (mimeType === "application/pdf") return "pdf";
-  if (mimeType.startsWith("video/")) return "video";
-  if (mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") return "docx";
-  return "generic";
-}
-
-export function getBucketForUpload(mimeType: string, tag?: string, departmentId?: string): StorageBucket {
+function getBucketForUpload(mimeType: string, tag?: string, departmentId?: string): StorageBucket {
   const cleanMime = mimeType.toLowerCase();
   if (cleanMime.startsWith("video/")) {
     return STORAGE_BUCKETS.videos;
@@ -98,7 +89,7 @@ async function computeFileChecksum(file: File): Promise<string> {
   }
 }
 
-export async function createSecurePreviewUrl(
+async function createSecurePreviewUrl(
   bucket: StorageBucket,
   path: string,
   expiresInSeconds = 60 * 60

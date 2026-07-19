@@ -295,20 +295,3 @@ export function renderBlock(block: Block, index: number): React.ReactNode {
   );
 }
 
-// ─── Document shell ───────────────────────────────────────────────────────────
-// Wraps a full block array with the correct outer spacing.
-
-export function renderDocument(blocks: Block[]): React.ReactNode {
-  if (!blocks || blocks.length === 0) return null;
-
-  return (
-    <article
-      style={{
-        maxWidth: "720px",
-        width:    "100%",
-      }}
-    >
-      {blocks.map((block, index) => renderBlock(block, index))}
-    </article>
-  );
-}

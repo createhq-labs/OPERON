@@ -7,7 +7,7 @@ const rawSupabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ?? 
  
 // ─── URL Validation ───────────────────────────────────────────────────────────
  
-export const supabaseUrlValidation: { valid: boolean; message: string } = (() => {
+const supabaseUrlValidation: { valid: boolean; message: string } = (() => {
   if (!rawSupabaseUrl) {
     return { valid: false, message: "NEXT_PUBLIC_SUPABASE_URL is missing." };
   }
