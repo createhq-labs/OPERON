@@ -3,7 +3,6 @@ import type {
   Department,
   DeptId,
   Document,
-  DocTag,
   DriveDocumentReference,
   GoogleDocsApiDocument,
   ResourceItem,
@@ -25,11 +24,9 @@ import type {
 import { DEFAULT_ROLE_ID } from "@/core/roles";
 import { getSupabaseDiagnostics, supabase, isSupabaseConfigured as isSupabaseConfiguredLib } from "@/lib/supabase";
 import { withTimeout } from "@/lib/async";
-import { uploadFileToStorage } from "@/services/storage";
 import { invalidateSearchIndex } from "@/services/search";
 import { logDiagnostic } from "./observability/diagnostics";
-import { type PendingUploadCacheItem } from "@/services/cache";
-import { enqueueRetryUpload } from "@/services/sync/retryQueue";
+import { listDocuments as fetchDocumentsFromServer } from "@/services/documentUpload";
 import type { IngestionJob, IngestionResult, IngestionFailure } from "@/services/ingestion/types";
 
 export type DataProviderMode = "local" | "supabase";
@@ -67,7 +64,6 @@ const DATA_HYDRATION_TIMEOUT_MS = 4000;
 let dataProviderMode: DataProviderMode = configuredForSupabase ? "supabase" : productionEnforceSupabase ? "supabase" : "local";
 let supabaseAvailable = false;
 const cacheAvailable = false;
-const pendingUploadStore: PendingUploadCacheItem[] = [];
 
 if (!configuredForSupabase) {
   console.warn(
@@ -1089,11 +1085,6 @@ export function getDocumentById(id: string) {
   return documentStore.find((document) => document.id === id);
 }
 
-export function getDriveDocuments() {
-  ensureSupabaseHydration();
-  return driveDocumentStore;
-}
-
 export function getDriveDocumentById(id: string) {
   ensureSupabaseHydration();
   return driveDocumentStore.find((document) => document.id === id);
@@ -1307,6 +1298,40 @@ export function saveDocument(document: Document) {
   return existing || document;
 }
 
+/**
+ * Merges a document already persisted by the backend (/api/documents/upload)
+ * into the local cache for immediate UI feedback. Unlike saveDocument(), this
+ * never fire-and-forgets a second write to Supabase — the server route is
+ * the sole writer for Drive-backed documents.
+ */
+export function applyDocumentFromServer(document: Document) {
+  const existing = getDocumentById(document.id);
+  if (existing) {
+    Object.assign(existing, document);
+  } else {
+    documentStore.unshift(document);
+  }
+  invalidateSearchIndex();
+  notifyDataChange();
+  return existing || document;
+}
+
+/**
+ * Replaces the local document cache with the authoritative, server-filtered
+ * list from GET /api/documents. Call on mount and after uploads so the
+ * Library reflects durable, shared state rather than session-local memory.
+ */
+export async function refreshDocumentsFromServer(): Promise<void> {
+  try {
+    const documents = await fetchDocumentsFromServer();
+    documentStore.splice(0, documentStore.length, ...documents);
+    invalidateSearchIndex();
+    notifyDataChange();
+  } catch (error) {
+    console.warn("Failed to refresh documents from server", error);
+  }
+}
+
 export function saveResource(resource: ResourceItem) {
   const existing = getResourceById(resource.id);
   if (existing) {
@@ -1496,103 +1521,6 @@ export function deleteHoliday(holidayId: string) {
 
 
 
-
-
-
-export async function saveUploadFileToStorage(
-  file: File,
-  authorId: string,
-  options?: {
-    tag?: DocTag;
-    departmentId?: DeptId;
-  }
-) {
-  if (!isSupabaseAvailable()) {
-    const pendingUpload: PendingUploadCacheItem = {
-      id: `upload-${Date.now()}`,
-      fileName: file.name,
-      tag: options?.tag,
-      departmentId: options?.departmentId,
-      authorId,
-      createdAt: new Date().toISOString(),
-      syncPending: true,
-    };
-
-    pendingUploadStore.unshift(pendingUpload);
-    enqueueRetryUpload(pendingUpload);
-    return {
-      rawSourceUrl: undefined,
-      previewUrl: undefined,
-      mimeType: file.type || undefined,
-      storageBucket: undefined,
-      storagePath: undefined,
-      storageSize: undefined,
-      uploadedBy: authorId,
-      syncPending: true,
-      uploadQueueId: pendingUpload.id,
-    };
-  }
-
-  const uploadMetadata = await uploadFileToStorage(file, authorId, {
-    tag: options?.tag,
-    departmentId: options?.departmentId,
-  });
-
-  if (!uploadMetadata) {
-    const pendingUpload: PendingUploadCacheItem = {
-      id: `upload-${Date.now()}`,
-      fileName: file.name,
-      tag: options?.tag,
-      departmentId: options?.departmentId,
-      authorId,
-      createdAt: new Date().toISOString(),
-      syncPending: true,
-      error: "Storage upload failed. The file will retry when the connection is restored.",
-    };
-    pendingUploadStore.unshift(pendingUpload);
-    enqueueRetryUpload(pendingUpload);
-    return {
-      rawSourceUrl: undefined,
-      previewUrl: undefined,
-      mimeType: file.type || undefined,
-      storageBucket: undefined,
-      storagePath: undefined,
-      storageSize: undefined,
-      uploadedBy: authorId,
-      syncPending: true,
-      uploadQueueId: pendingUpload.id,
-      error: pendingUpload.error,
-    };
-  }
-
-  const uploadRecord = {
-    id: `upload-${Date.now()}`,
-    fileName: uploadMetadata.fileName,
-    storageBucket: uploadMetadata.bucket,
-    storagePath: uploadMetadata.path,
-    publicUrl: uploadMetadata.publicUrl,
-    previewUrl: uploadMetadata.previewUrl ?? null,
-    mimeType: uploadMetadata.mimeType || null,
-    size: uploadMetadata.size,
-    uploadedBy: uploadMetadata.uploadedBy,
-    authorId,
-    createdAt: new Date().toISOString(),
-  };
-
-  if (isSupabaseAvailable()) {
-    void safeSupabaseWrite(() => supabase.from("uploads").upsert(createUpsertPayload(uploadRecord), { onConflict: "legacy_id" }));
-  }
-  return {
-    rawSourceUrl: uploadMetadata.publicUrl || undefined,
-    previewUrl: uploadMetadata.previewUrl ?? undefined,
-    mimeType: uploadMetadata.mimeType || undefined,
-    storageBucket: uploadMetadata.bucket,
-    storagePath: uploadMetadata.path,
-    storageSize: uploadMetadata.size,
-    uploadedBy: uploadMetadata.uploadedBy,
-    syncPending: false,
-  };
-}
 
 
 

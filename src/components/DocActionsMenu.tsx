@@ -7,7 +7,7 @@ import { openFloatingLayer, subscribeFloatingLayerClose } from "@/lib/floatingLa
 import { motionPreset } from "@/styles/motionPresets";
 import { S } from "@/styles/sharedUi";
 
-/** Per-document "⋮" menu — Rename/Replace/Delete, gated by permission. Same open/close pattern as PremiumSelect. */
+/** Per-document "⋮" menu — Edit/Replace/Delete, gated by permission. Same open/close pattern as PremiumSelect. */
 export function DocActionsMenu({
   canEdit,
   canDelete,
@@ -114,7 +114,7 @@ export function DocActionsMenu({
                 }}
               >
                 <Pencil size={13} aria-hidden="true" />
-                Rename
+                Edit details
               </button>
             )}
             {canEdit && (

@@ -125,6 +125,8 @@ export interface User {
   roleId:         RoleId;
   /** Normalized authorization source from global.roles.name. */
   roleName?:      string;
+  /** Real global.roles.id UUID — distinct from roleId, which is a lossy 5-value collapse of it. Needed for document_allowed_roles-style checks against the real role catalog. */
+  globalRoleId?:  string;
   departmentId?:  DeptId;
   teamId?:        string;
   supervisorId?:  string;
@@ -221,6 +223,9 @@ export interface DocMeta {
   broadcastAudience?:     BroadcastAudience;
   broadcastRoleIds?:      RoleId[];
   broadcastDepartmentIds?: DeptId[];
+  driveFileId?:       string;
+  driveWebViewLink?:  string;
+  currentVersionId?:  string;
 }
 
 // ─── Drive ───────────────────────────────────────────────────────────────────

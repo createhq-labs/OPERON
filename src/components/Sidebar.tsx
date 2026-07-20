@@ -16,6 +16,7 @@ import {
 import type { User } from "@/core/types";
 import { Logo } from "@/components/Logo";
 import { spring } from "@/styles/motionPresets";
+import { canManageDrive } from "@/security/permissions";
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
@@ -56,7 +57,7 @@ function DriveStatus({ connected }: { connected: boolean }) {
         border:       "1px solid var(--op-border)",
       }}
       role="status"
-      aria-label={connected ? "Google Drive connected" : "Google Drive disconnected"}
+      aria-label={connected ? "Central storage connected" : "Central storage unavailable"}
     >
       <div
         style={{
@@ -76,7 +77,7 @@ function DriveStatus({ connected }: { connected: boolean }) {
           letterSpacing: "0.04em",
         }}
       >
-        {connected ? "Drive connected" : "Drive disconnected"}
+        {connected ? "Central storage connected" : "Central storage unavailable"}
       </span>
     </div>
   );
@@ -240,15 +241,18 @@ export function Sidebar({
         })}
       </nav>
 
-      {/* Drive status */}
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.3, delay: 0.18 }}
-        style={{ marginTop: "auto", paddingTop: "8px" }}
-      >
-        <DriveStatus connected={driveConnected} />
-      </motion.div>
+      {/* Central Drive storage status — admin diagnostics only. Regular users
+          never see Google Drive referenced anywhere in the UI. */}
+      {canManageDrive(user) && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.3, delay: 0.18 }}
+          style={{ marginTop: "auto", paddingTop: "8px" }}
+        >
+          <DriveStatus connected={driveConnected} />
+        </motion.div>
+      )}
 
       {/* Role badge */}
       <motion.div

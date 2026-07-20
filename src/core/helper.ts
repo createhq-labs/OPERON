@@ -209,14 +209,6 @@ export function deriveAvatar(name: string): string {
     .toUpperCase();
 }
 
-// ─── Read Time ───────────────────────────────────────────────────────────────
-
-/** Estimates reading time at 180 wpm. Returns a "N min" string. */
-export function estimateReadTime(text: string): string {
-  const words = text.trim().split(/\s+/).filter(Boolean).length;
-  return `${Math.max(1, Math.ceil(words / 180))} min`;
-}
-
 // ─── ToC Normalisation ───────────────────────────────────────────────────────
 
 /**
@@ -327,19 +319,6 @@ export function deriveQuickActions(
   return actions.filter((action) => action.visible);
 }
 
-// ─── Ingestion ID Generation ─────────────────────────────────────────────────
-
-/** Generates a unique ingestion job ID. */
-export function generateIngestionJobId(): string {
-  return `ingest-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-/** Generates a document ID for a locally uploaded document. */
-export function generateDocumentId(): string {
-  return `doc-${Date.now()}`;
-}
-
-/** Generates a Drive document reference ID. */
 /** Generates an activity event ID. */
 export function generateActivityId(): string {
   return `act_${Date.now()}`;

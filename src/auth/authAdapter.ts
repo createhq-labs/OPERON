@@ -73,7 +73,7 @@ function coerceStringArray(value: unknown): string[] {
     : [];
 }
 
-function appRoleFromGlobalRole(value: unknown): string {
+export function appRoleFromGlobalRole(value: unknown): string {
   const role = Array.isArray(value) ? value[0] : value;
   const name = typeof role === "object" && role !== null
     ? coerceString((role as Record<string, unknown>).name).toLowerCase()

@@ -31,6 +31,49 @@ Before using the web application:
    can use Supabase's own dashboard "invite user" feature for password
    access.
 4. Configure the site URL and allowed redirect URLs in Supabase Auth.
+5. The Library's Upload Document / Replace File flow needs **no new
+   migration at all** — it's built entirely on tables `001_workforce_foundation.sql`
+   already created and applied: `workforce.documents` /
+   `workforce.document_versions` for the file/version rows,
+   `workforce.document_categories` (previously empty — now seeded on
+   demand, one row per `DocTag`, via `resolveCategoryId()` in
+   `src/app/api/documents/categories.ts`) instead of a dedicated `tag`
+   column, and the `document_allowed_roles` / `document_allowed_departments`
+   junction tables for permissions instead of array columns. `storage_path`
+   holds the Drive file ID and `preview_url` holds its `webViewLink` —
+   there's no separate `drive_file_id` column either.
+
+   One real, deliberate behavior change this implies: `document_allowed_roles.role_id`
+   references `global.roles` — the real role catalog (Co-Founder, HR
+   Manager, HR Executive, Category Lead, etc.), not the collapsed 5-value
+   `roleId` string (`admin`/`team_lead`/…) used elsewhere for capability
+   checks. So the Upload/Edit document forms' "Visible to" picker now shows
+   the real role catalog (fetched via the same `listAssignableRoles()` the
+   HR invitation form already uses), not the app's simplified role set. A
+   document's caller-side access check in `src/app/api/documents/access.ts`
+   accordingly compares against the caller's real `global.roles.id`
+   (`User.globalRoleId`, added in `src/app/api/documents/identity.ts`), not
+   the collapsed `roleId`.
+
+   There is also no persisted upload-status/retry state: a `documents` row
+   is only ever inserted after the Drive upload has already succeeded, so
+   a failed upload leaves no trace and simply surfaces an error for the
+   user to resubmit — no separate `Retry` action in the Library.
+
+   The upload path itself is entirely server-mediated: the browser sends
+   the file to `/api/documents/upload`, which uploads it via one central
+   Drive *service account* (`GOOGLE_SERVICE_ACCOUNT_JSON` +
+   `GOOGLE_DRIVE_FOLDER_ID` in the server environment) and only then writes
+   the row. No end user ever sees Google account/OAuth controls — Drive is
+   invisible infrastructure. Requires a Google Cloud service account with
+   `client_email` shared on either a Shared Drive or a folder owned by a
+   real user (a bare service account has no Drive storage quota of its
+   own). `/api/documents/sync` (a Vercel Cron target, see `vercel.json`)
+   periodically re-fetches each document's Drive metadata and overwrites
+   `file_name`/`mime_type`/`file_size_bytes` in place, so a file edited
+   directly in Drive (outside the app) still shows current metadata —
+   title/description/category/visibility/roles are app-only and are never
+   touched by that job.
 
 `007_workforce_operational_queries.sql` includes the final integrity audit.
 After all migrations complete, run:
@@ -77,3 +120,18 @@ Also removed the now-orphaned `supabase/policies/*.sql` folder (14 files —
 `drive_accounts.sql`, etc.) — RLS `CREATE POLICY` statements written against
 the tables `001`/`010` would have created. With those migrations gone, these
 policies had nothing left to apply to.
+
+Replaced the per-user Google OAuth Drive connector (`/api/drive` route,
+`src/services/googleDriveClient.ts`, `src/services/drive.ts` — "connect your
+Google account," attach/sync/webhook) with a single centrally managed
+service-account integration (`src/services/googleDriveServiceAccount.ts`,
+resurrected from an earlier unused-code sweep since it was actually the
+right shape for this). The OAuth connector was already dead code — no
+client credentials were configured and nothing in the UI triggered it — and
+the new design specifically requires Drive to be invisible to end users, so
+it was deleted rather than kept as a second, unused pipeline. Note: this
+also leaves the local-upload ingestion/parsing pipeline
+(`src/services/ingestion/*`, `src/services/parser/{baseParser,parserFactory}.ts`)
+fully orphaned, since the new upload path stores files in Drive without
+running them through that parser — flagged, not removed, since it's a
+separate subsystem this change didn't set out to touch.

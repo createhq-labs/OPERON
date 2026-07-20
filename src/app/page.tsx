@@ -5,8 +5,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Menu, FileText } from "lucide-react";
 import { useRouter } from "next/navigation";
 
-import type { DriveDiagnostics } from "@/services/drive";
-import { getDriveConnectorStatus } from "@/services/drive";
+import { getDocumentStorageDiagnostics } from "@/services/documentUpload";
+import { listAssignableRoles, listAssignableDepartments, type AssignmentOption } from "@/lib/workforce/invitations";
 import type {
   DeptId, DocTag, Document, DriveParsedDocument, QuickActionItem, ResourceCategory,
   Role, RoleId, User, VisibilityScope,
@@ -25,6 +25,7 @@ import {
 } from "@/core/operon";
 import {
   getProviderHealth, setDataProviderMode, subscribeToDataUpdates, onSupabaseHydrated,
+  refreshDocumentsFromServer,
 } from "@/services/api";
 import { DocumentReaderShell } from "@/features/reader/DocumentReaderShell";
 import { useSession } from "@/auth/useSession";
@@ -40,7 +41,7 @@ import { motionPreset } from "@/styles/motionPresets";
 import { S, T, Sp } from "@/styles/sharedUi";
 import { DEFAULT_ROLE_ID, ROLE_SELECTION_OPTIONS } from "@/core/roles";
 import { archiveDocument as archiveWorkforceDocument } from "@/lib/workforce/documents";
-import { canAccessWorkforce, canUploadDocument } from "@/security/permissions";
+import { canAccessWorkforce, canUploadDocument, canManageDrive } from "@/security/permissions";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -127,8 +128,15 @@ export default function Page() {
   const [libraryCategory, setLibraryCategory] = useState<LibraryCategoryId>("all");
   const [libraryDept,     setLibraryDept]     = useState<"all" | DeptId>("all");
 
-  // ── Library doc actions: rename / replace / delete ──────────────────────
-  const [renameDraft,     setRenameDraft]     = useState<{ id: string; title: string } | null>(null);
+  // ── Library doc actions: edit / replace / delete ─────────────────────────
+  const [editDraft, setEditDraft] = useState<{
+    id: string;
+    title: string;
+    description: string;
+    tag: DocTag;
+    visibilityScope: VisibilityScope;
+    allowedRoleIds: RoleId[];
+  } | null>(null);
   const [deleteTarget,    setDeleteTarget]    = useState<Document | null>(null);
   const [docActionError,  setDocActionError]  = useState("");
   const [archiveReason,   setArchiveReason]   = useState("");
@@ -139,16 +147,15 @@ export default function Page() {
   const [uploadTitle,         setUploadTitle]         = useState("");
   const [uploadDescription,   setUploadDescription]   = useState("");
   const [uploadCategory,      setUploadCategory]      = useState<DocTag>("sop");
-  const [uploadDepartment,    setUploadDepartment]    = useState<DeptId>("operations");
+  const [uploadDepartment,    setUploadDepartment]    = useState<DeptId>("");
   const [uploadVisibility,    setUploadVisibility]    = useState<VisibilityScope>("department");
-  const [uploadDepartmentIds, setUploadDepartmentIds] = useState<DeptId[]>([]);
-  const [uploadTeamIds,       setUploadTeamIds]       = useState<string[]>([]);
   const [selectedRoleIds,     setSelectedRoleIds]     = useState<RoleId[]>([]);
-  const [selectedUserIds,     setSelectedUserIds]     = useState<string[]>([]);
   const [uploadFile,          setUploadFile]          = useState<File | null>(null);
   const [uploadStatus,        setUploadStatus]        = useState("");
   const [uploadError,         setUploadError]         = useState("");
   const uploadFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [assignableRoles,          setAssignableRoles]          = useState<AssignmentOption[]>([]);
+  const [assignableDocDepartments, setAssignableDocDepartments] = useState<AssignmentOption[]>([]);
 
   // ── Resources ────────────────────────────────────────────────────────────
   const [resourceQuery,            setResourceQuery]            = useState("");
@@ -166,7 +173,6 @@ export default function Page() {
   const [providerLoading, setProviderLoading] = useState(true);
   const [_providerReady,   setProviderReady]   = useState(false);
   const [_providerHealth,  setProviderHealth]  = useState(getProviderHealth());
-  const [driveDiagnostics, _setDriveDiagnostics] = useState<DriveDiagnostics | null>(null);
   const [driveConnected, setDriveConnected] = useState(false);
   const [cachedQuickActions, setCachedQuickActions] = useState<Array<{ id: string; label: string; description: string; category?: string }>>([]);
 
@@ -256,14 +262,34 @@ export default function Page() {
     return () => { unsubChanges(); unsubHydration(); };
   }, []);
 
-  // ─── Drive connector status ────────────────────────────────────────────────
+  // ─── Central Drive storage diagnostics (admin-only) ───────────────────────
   useEffect(() => {
-    if (!user) return;
+    if (!user || !canManageDrive(user)) return;
     let cancelled = false;
-    getDriveConnectorStatus().then((status) => {
-      if (!cancelled) setDriveConnected(Boolean(status?.connected));
+    getDocumentStorageDiagnostics().then((diagnostics) => {
+      if (!cancelled) setDriveConnected(diagnostics.connected);
     });
     return () => { cancelled = true; };
+  }, [user]);
+
+  // ─── Document library refresh ──────────────────────────────────────────────
+  // Documents are persisted server-side (workforce.documents); refresh the
+  // local cache from GET /api/documents so uploads are durable and shared
+  // across sessions, not just visible for the tab that made them.
+  useEffect(() => {
+    if (!user) return;
+    void refreshDocumentsFromServer();
+  }, [user]);
+
+  // ─── Real role/department catalogs for document permission targeting ─────
+  // Documents restrict access via the real global.roles / global.departments
+  // catalog (workforce.document_allowed_roles / document_allowed_departments),
+  // not the app's legacy in-memory role/department lists — those don't
+  // correspond to real rows these tables can reference.
+  useEffect(() => {
+    if (!user) return;
+    listAssignableRoles().then(setAssignableRoles).catch(() => undefined);
+    listAssignableDepartments().then(setAssignableDocDepartments).catch(() => undefined);
   }, [user]);
 
   // ─── Quick actions cache ──────────────────────────────────────────────────
@@ -503,43 +529,44 @@ export default function Page() {
     setUploadError("");
 
     try {
-      const departmentId = user.roleId === "role_cofounder" ? uploadDepartment : (user.departmentId ?? "operations");
+      const departmentId = uploadDepartment || (user.departmentId ?? "");
       await createDocumentUploadFromFile(uploadFile, {
-        title:            uploadTitle.trim(),
-        description:      uploadDescription.trim(),
+        title:           uploadTitle.trim(),
+        description:     uploadDescription.trim(),
         departmentId,
-        authorId:         user.id,
-        tag:              uploadCategory,
-        allowedRoleIds:   selectedRoleIds,
-        allowedUserTypes: ["employee", "creator"],
-        assignedUserIds:  user.roleId === "role_cofounder" ? selectedUserIds : undefined,
-        visibilityScope:  uploadVisibility,
-        allowedDepartments: uploadDepartmentIds.length > 0 ? uploadDepartmentIds : [departmentId],
-        allowedTeamIds:   uploadTeamIds,
+        authorId:        user.id,
+        tag:             uploadCategory,
+        allowedRoleIds:  selectedRoleIds,
+        visibilityScope: uploadVisibility,
       });
       setUploadStatus(`"${uploadTitle.trim()}" added to the library.`);
       setUploadTitle("");
       setUploadDescription("");
       setUploadFile(null);
       setSelectedRoleIds([]);
-      setSelectedUserIds([]);
-      setUploadDepartmentIds([]);
-      setUploadTeamIds([]);
       setUploadVisibility("department");
+      void refreshDocumentsFromServer();
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "Upload failed. Please try again.");
       setUploadStatus("");
     }
   }
 
-  function handleRenameSubmit() {
-    if (!user || !renameDraft || !renameDraft.title.trim()) return;
+  async function handleEditSubmit() {
+    if (!user || !editDraft || !editDraft.title.trim() || editDraft.allowedRoleIds.length === 0) return;
     try {
-      updateDocumentMetadata(user, renameDraft.id, { title: renameDraft.title.trim() });
-      setRenameDraft(null);
+      await updateDocumentMetadata(user, editDraft.id, {
+        title:           editDraft.title.trim(),
+        description:     editDraft.description.trim(),
+        tag:             editDraft.tag,
+        visibilityScope: editDraft.visibilityScope,
+        allowedRoleIds:  editDraft.allowedRoleIds,
+      });
+      setEditDraft(null);
       setDocActionError("");
+      void refreshDocumentsFromServer();
     } catch (err) {
-      setDocActionError(err instanceof Error ? err.message : "Failed to rename document.");
+      setDocActionError(err instanceof Error ? err.message : "Failed to update document.");
     }
   }
 
@@ -562,6 +589,7 @@ export default function Page() {
     try {
       await replaceDocumentFile(user, replaceTargetId, file);
       setDocActionError("");
+      void refreshDocumentsFromServer();
     } catch (err) {
       setDocActionError(err instanceof Error ? err.message : "Failed to replace document.");
     } finally {
@@ -817,7 +845,7 @@ export default function Page() {
             {/* Home */}
             {selectedSection === "home" && (
               <HomePanel
-                user={user} providerLoading={providerLoading} driveDiagnostics={driveDiagnostics}
+                user={user} providerLoading={providerLoading}
                 displayQuickActions={displayQuickActions} accessibleDocs={accessibleDocs} pinnedDocs={pinnedDocs}
                 onActionSelect={handleQuickActionSelect}
                 onShowDoc={showDoc}
@@ -851,7 +879,8 @@ export default function Page() {
                   <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "10px", marginBottom: "16px" }}>
                     <input value={librarySearch} onChange={(e) => { setLibrarySearch(e.target.value); setGlobalSearch(e.target.value); }} placeholder="Search documents…" style={{ ...S.input }} />
                     <select value={libraryDept} onChange={(e) => setLibraryDept(e.target.value as "all" | DeptId)} style={{ ...S.select, width: "160px" }}>
-                      {getDepartmentFilters().map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
+                      <option value="all">All</option>
+                      {assignableDocDepartments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
                     </select>
                   </div>
 
@@ -914,7 +943,14 @@ export default function Page() {
                               <DocActionsMenu
                                 canEdit={canEditDocuments(user)}
                                 canDelete={canDeleteDocuments(user)}
-                                onRename={() => setRenameDraft({ id: doc.id, title: doc.title })}
+                                onRename={() => setEditDraft({
+                                  id: doc.id,
+                                  title: doc.title,
+                                  description: doc.description,
+                                  tag: doc.tag,
+                                  visibilityScope: doc.visibilityScope,
+                                  allowedRoleIds: doc.allowedRoleIds,
+                                })}
                                 onReplace={() => { setReplaceTargetId(doc.id); replaceFileInputRef.current?.click(); }}
                                 onDelete={() => setDeleteTarget(doc)}
                               />
@@ -946,15 +982,14 @@ export default function Page() {
                       style={{ ...S.textarea, resize: "vertical" as const }}
                     />
 
-                    <div style={{ display: "grid", gridTemplateColumns: user.roleId === "role_cofounder" ? "1fr 1fr" : "1fr", gap: "10px" }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
                       <select value={uploadCategory} onChange={(e) => setUploadCategory(e.target.value as DocTag)} style={S.select}>
                         {Object.entries(TAG_LABELS).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
                       </select>
-                      {user.roleId === "role_cofounder" && (
-                        <select value={uploadDepartment} onChange={(e) => setUploadDepartment(e.target.value as DeptId)} style={S.select}>
-                          {getDepartmentFilters().filter((f) => f.id !== "all").map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
-                        </select>
-                      )}
+                      <select value={uploadDepartment} onChange={(e) => setUploadDepartment(e.target.value as DeptId)} style={S.select}>
+                        <option value="">No home department</option>
+                        {assignableDocDepartments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                      </select>
                     </div>
 
                     <select value={uploadVisibility} onChange={(e) => setUploadVisibility(e.target.value as VisibilityScope)} style={S.select}>
@@ -967,12 +1002,12 @@ export default function Page() {
                     <div>
                       <div style={S.label}>Visible to</div>
                       <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
-                        {ROLE_SELECTION_OPTIONS.map((opt) => (
+                        {assignableRoles.map((opt) => (
                           <button key={opt.id} type="button"
                             onClick={() => setSelectedRoleIds((c) => c.includes(opt.id) ? c.filter((id) => id !== opt.id) : [...c, opt.id])}
                             style={S.toggleBtn(selectedRoleIds.includes(opt.id))}
                           >
-                            <span>{opt.title}</span>
+                            <span>{opt.name}</span>
                             <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-11)", color: selectedRoleIds.includes(opt.id) ? "var(--op-accent)" : "var(--op-text-3)" }}>
                               {selectedRoleIds.includes(opt.id) ? "✓" : ""}
                             </span>
@@ -1051,24 +1086,71 @@ export default function Page() {
                 />
 
                 <Modal
-                  open={renameDraft !== null}
-                  title="Rename document"
-                  onClose={() => setRenameDraft(null)}
+                  open={editDraft !== null}
+                  title="Edit document"
+                  onClose={() => setEditDraft(null)}
                   footer={
                     <>
-                      <Button variant="ghost" onClick={() => setRenameDraft(null)}>Cancel</Button>
-                      <Button variant="primary" onClick={handleRenameSubmit} disabled={!renameDraft?.title.trim()}>Save</Button>
+                      <Button variant="ghost" onClick={() => setEditDraft(null)}>Cancel</Button>
+                      <Button variant="primary" onClick={() => void handleEditSubmit()} disabled={!editDraft?.title.trim() || editDraft?.allowedRoleIds.length === 0}>Save</Button>
                     </>
                   }
                 >
-                  <input
-                    value={renameDraft?.title ?? ""}
-                    onChange={(e) => setRenameDraft((draft) => (draft ? { ...draft, title: e.target.value } : draft))}
-                    onKeyDown={(e) => { if (e.key === "Enter") handleRenameSubmit(); }}
-                    placeholder="Document title"
-                    autoFocus
-                    style={S.input}
-                  />
+                  <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                    <input
+                      value={editDraft?.title ?? ""}
+                      onChange={(e) => setEditDraft((draft) => (draft ? { ...draft, title: e.target.value } : draft))}
+                      placeholder="Document title"
+                      autoFocus
+                      style={S.input}
+                    />
+                    <textarea
+                      value={editDraft?.description ?? ""}
+                      onChange={(e) => setEditDraft((draft) => (draft ? { ...draft, description: e.target.value } : draft))}
+                      placeholder="Short description (optional)"
+                      rows={2}
+                      style={{ ...S.textarea, resize: "vertical" as const }}
+                    />
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                      <select
+                        value={editDraft?.tag ?? "internal"}
+                        onChange={(e) => setEditDraft((draft) => (draft ? { ...draft, tag: e.target.value as DocTag } : draft))}
+                        style={S.select}
+                      >
+                        {Object.entries(TAG_LABELS).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+                      </select>
+                      <select
+                        value={editDraft?.visibilityScope ?? "department"}
+                        onChange={(e) => setEditDraft((draft) => (draft ? { ...draft, visibilityScope: e.target.value as VisibilityScope } : draft))}
+                        style={S.select}
+                      >
+                        <option value="department">Department</option>
+                        <option value="private">Private</option>
+                        <option value="global">Global</option>
+                      </select>
+                    </div>
+                    <div>
+                      <div style={S.label}>Visible to</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+                        {assignableRoles.map((opt) => (
+                          <button key={opt.id} type="button"
+                            onClick={() => setEditDraft((draft) => draft ? {
+                              ...draft,
+                              allowedRoleIds: draft.allowedRoleIds.includes(opt.id)
+                                ? draft.allowedRoleIds.filter((id) => id !== opt.id)
+                                : [...draft.allowedRoleIds, opt.id],
+                            } : draft)}
+                            style={S.toggleBtn(editDraft?.allowedRoleIds.includes(opt.id) ?? false)}
+                          >
+                            <span>{opt.name}</span>
+                            <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-11)", color: editDraft?.allowedRoleIds.includes(opt.id) ? "var(--op-accent)" : "var(--op-text-3)" }}>
+                              {editDraft?.allowedRoleIds.includes(opt.id) ? "✓" : ""}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                   {docActionError && <p style={{ ...S.errorText, marginTop: "8px" }}>{docActionError}</p>}
                 </Modal>
 

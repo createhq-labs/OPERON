@@ -14,7 +14,6 @@ import {
   Surface,
 } from "@/components/ui";
 import type { Document, DriveDocumentReference, QuickActionItem, User } from "@/core/operon";
-import type { DriveDiagnostics } from "@/services/drive";
 import { motionPreset, motionTransition } from "@/styles/motionPresets";
 import { S, Sp, T } from "@/styles/sharedUi";
 
@@ -26,7 +25,6 @@ const TAG_LABELS: Record<string, string> = {
 interface HomePanelProps {
   user: User;
   providerLoading: boolean;
-  driveDiagnostics?: DriveDiagnostics | null;
   displayQuickActions: Array<Pick<QuickActionItem, "id" | "label" | "description" | "category">>;
   accessibleDocs: Array<Document | DriveDocumentReference>;
   pinnedDocs: Document[];
@@ -37,7 +35,6 @@ interface HomePanelProps {
 export function HomePanel({
   user,
   providerLoading,
-  driveDiagnostics: _driveDiagnostics,
   displayQuickActions,
   accessibleDocs,
   pinnedDocs,

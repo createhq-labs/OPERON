@@ -118,7 +118,6 @@ import type {
   ResourceCategory,
   ActivityEvent,
   UserType,
-  TocItem,
   DriveParsedDocument,
   Notification,
   OnboardingRecord,
@@ -143,12 +142,9 @@ import {
   permissionFromPolicy,
   userMatchesAccessRestrictions,
   deriveAvatar,
-  estimateReadTime,
   normalizeTocItems,
   formatDocumentDate,
   deriveQuickActions,
-  generateIngestionJobId,
-  generateDocumentId,
   generateActivityId,
   generateUserId,
   generateResourceId,
@@ -163,8 +159,7 @@ import {
 
 import * as api from "@/services/api";
 import { parseGoogleDriveDocument } from "@/services/parser";
-import { getParserByExtension, getParserByMimeType } from "@/services/parser/registry";
-import { enqueueIngestionJob, startIngestionWorker } from "@/services/ingestion";
+import { uploadDocumentFile, uploadDocumentNewVersion, updateDocument } from "@/services/documentUpload";
 import { filterActivityForUser } from "@/services/activity";
 import { isVisibleToUser } from "@/security/visibility";
 import { getCurrentDocumentVersionId } from "@/services/documentPlatform";
@@ -2410,279 +2405,51 @@ export function createResource(resource: {
 
 // ─── Document Mutations ───────────────────────────────────────────────────────
 
-function createDocumentUpload(document: {
-  title:                  string;
-  description:            string;
-  departmentId:           DeptId;
-  authorId:               string;
-  tag:                    DocTag;
-  allowedRoleIds:         RoleId[];
-  allowedUserTypes?:      UserType[];
-  assignedUserIds?:       string[];
-  visibilityScope?:       VisibilityScope;
-  allowedDepartments?:    DeptId[];
-  allowedTeamIds?:        string[];
-  globalPinned?:          boolean;
-  mandatoryRead?:         boolean;
-  broadcastAudience?:     BroadcastAudience;
-  broadcastRoleIds?:      RoleId[];
-  broadcastDepartmentIds?: DeptId[];
-  toc?:            TocItem[];
-  blocks?:         Block[];
-  rawSourceUrl?:   string;
-  previewUrl?:     string;
-  mimeType?:       string;
-  storageBucket?:  string;
-  storagePath?:    string;
-  storageSize?:    number;
-  uploadedBy?:     string;
-  extractedText?:  string;
-  parsedBlocks?:   Block[];
-  parserStatus?:   import("@/core/types").ParserStatus;
-  parserVersion?:  string;
-  lifecycleState?: import("@/core/types").DocumentState;
-  ingestionStatus?: "queued" | "processing" | "completed" | "failed" | "retrying";
-  ingestionJobId?:  string;
-  parserConfidence?:  number;
-  parserWarnings?:    string[];
-}): Document {
-  const author = getUserById(document.authorId);
-  requireAuthenticatedUser(author);
-  requireUploadPermission(author);
-
-  if (!document.allowedRoleIds?.length) {
-    throw new Error("Document upload requires at least one allowed role.");
-  }
-
-  const normalizedUserTypes: UserType[] =
-    document.allowedUserTypes?.length
-      ? document.allowedUserTypes
-      : ([...new Set(
-          document.allowedRoleIds
-            .map((id) => getRoleById(id)?.userType)
-            .filter((t): t is UserType => !!t),
-        )] as UserType[]);
-
-  if (!normalizedUserTypes.length) {
-    throw new Error("Document upload requires at least one user type.");
-  }
-
-  const isBroadcast =
-    document.visibilityScope === "global" ||
-    document.broadcastAudience === "all" ||
-    document.broadcastAudience === "department" ||
-    !!document.broadcastRoleIds?.length;
-
-  if (isBroadcast && !canPublishGlobally(author!)) {
-    throw new Error("You are not authorized to publish documents globally.");
-  }
-
-  const now = formatDocumentDate();
-
-  const newDocument: Document = {
-    id:               generateDocumentId(),
-    title:            document.title,
-    description:      document.description,
-    departmentId:     document.departmentId,
-    dept:             getDepartmentLabel(document.departmentId),
-    tag:              document.tag,
-    allowedRoleIds:   document.allowedRoleIds,
-    allowedUserTypes: normalizedUserTypes,
-    assignedUserIds:  document.assignedUserIds,
-    readTime:         estimateReadTime(document.description),
-    authorId:         document.authorId,
-    author:           author!.name,
-    createdById:      document.authorId,
-    updatedAt:        now,
-    updatedById:      document.authorId,
-    version:          "v1.0",
-    pinned:           false,
-    globalPinned:     document.globalPinned ?? false,
-    mandatoryRead:    document.mandatoryRead ?? false,
-    broadcastAudience: document.broadcastAudience ?? "none",
-    broadcastRoleIds: document.broadcastRoleIds,
-    broadcastDepartmentIds: document.broadcastDepartmentIds,
-    source:           "uploaded",
-    sourceProvider:   "localUpload",
-    lifecycleState:   document.lifecycleState ?? "uploaded",
-    visibilityScope:  document.visibilityScope ?? "department",
-    allowedDepartments: document.allowedDepartments ?? [document.departmentId],
-    allowedTeamIds:   document.allowedTeamIds,
-    rawSourceUrl:     document.rawSourceUrl,
-    previewUrl:       document.previewUrl,
-    mimeType:         document.mimeType,
-    storageBucket:    document.storageBucket,
-    storagePath:      document.storagePath,
-    storageSize:      document.storageSize,
-    uploadedBy:       document.uploadedBy,
-    extractedText:    document.extractedText,
-    parsedBlocks:     document.parsedBlocks,
-    parserStatus:     document.parserStatus,
-    parserVersion:    document.parserVersion,
-    parserConfidence: document.parserConfidence,
-    parserWarnings:   document.parserWarnings,
-    ingestionStatus:  document.ingestionStatus,
-    ingestionJobId:   document.ingestionJobId,
-    toc: document.toc ?? [{ id: "overview", label: "Overview", level: 1 }],
-    blocks: document.blocks ?? [
-      { type: "heading",   id: "overview", content: document.title, anchorId: "overview" },
-      { type: "paragraph", content: document.description },
-    ],
-  };
-
-  api.saveDocument(newDocument);
-  recordActivity({
-    userId:     document.authorId,
-    action:     "DOCUMENT_CREATED",
-    targetType: "document",
-    targetId:   newDocument.id,
-    metadata:   { title: newDocument.title },
-  });
-
-  return newDocument;
-}
-
 export async function createDocumentUploadFromFile(
   file: File,
   options: {
-    title:               string;
-    description?:        string;
-    departmentId:        DeptId;
-    authorId:            string;
-    tag:                 DocTag;
-    allowedRoleIds:      RoleId[];
-    allowedUserTypes?:   UserType[];
-    assignedUserIds?:    string[];
-    visibilityScope?:    VisibilityScope;
-    allowedDepartments?: DeptId[];
-    allowedTeamIds?:     string[];
+    title:            string;
+    description?:     string;
+    departmentId:     DeptId;
+    authorId:         string;
+    tag:              DocTag;
+    /** Real global.roles.id UUIDs, from listAssignableRoles(). */
+    allowedRoleIds:   RoleId[];
+    visibilityScope?: VisibilityScope;
   },
 ): Promise<Document> {
+  // Non-authoritative — fast client-side feedback only. The backend
+  // re-resolves the caller's real identity/capability server-side and is
+  // the actual gate; it never trusts these client-supplied checks.
   const author = getUserById(options.authorId);
   requireAuthenticatedUser(author);
   requireUploadPermission(author);
 
-  const uploadMetadata = await api.saveUploadFileToStorage(file, options.authorId, {
-    tag:          options.tag,
-    departmentId: options.departmentId,
+  const document = await uploadDocumentFile(file, {
+    title:           options.title.trim() || file.name.replace(/\.[^/.]+$/, ""),
+    description:     options.description?.trim() ?? "",
+    departmentId:    options.departmentId,
+    tag:             options.tag,
+    allowedRoleIds:  options.allowedRoleIds,
+    visibilityScope: options.visibilityScope,
   });
 
-  const parserType =
-    getParserByMimeType(uploadMetadata.mimeType || file.type)?.parserType ??
-    getParserByExtension(file.name.split(".").pop()?.toLowerCase())?.parserType ??
-    "plainText";
-
-  const ingestionJobId = generateIngestionJobId();
-
-  const document = createDocumentUpload({
-    title:            options.title.trim() || file.name.replace(/\.[^/.]+$/, ""),
-    description:      options.description?.trim() ?? "",
-    departmentId:     options.departmentId,
-    authorId:         options.authorId,
-    tag:              options.tag,
-    allowedRoleIds:   options.allowedRoleIds,
-    allowedUserTypes: options.allowedUserTypes,
-    assignedUserIds:  options.assignedUserIds,
-    visibilityScope:  options.visibilityScope,
-    allowedDepartments: options.allowedDepartments,
-    allowedTeamIds:   options.allowedTeamIds,
-    rawSourceUrl:     uploadMetadata.rawSourceUrl,
-    previewUrl:       uploadMetadata.previewUrl,
-    mimeType:         uploadMetadata.mimeType,
-    storageBucket:    uploadMetadata.storageBucket,
-    storagePath:      uploadMetadata.storagePath,
-    storageSize:      uploadMetadata.storageSize,
-    uploadedBy:       uploadMetadata.uploadedBy,
-    extractedText:    "",
-    parsedBlocks:     [],
-    parserStatus:     "pending",
-    parserVersion:    "1.0",
-    lifecycleState:   "processing",
-    ingestionStatus:  "queued",
-    ingestionJobId,
-  });
-
-  const job = enqueueIngestionJob({
-    uploadId:   uploadMetadata.uploadQueueId,
-    documentId: document.id,
-    sourceType: "localUpload",
-    parserType,
-    sourceUrl:  uploadMetadata.rawSourceUrl,
-    fileName:   file.name,
-    mimeType:   uploadMetadata.mimeType || file.type,
-    file,
-    metadata: {
-      authorId:     options.authorId,
-      departmentId: options.departmentId,
-      tag:          options.tag,
-    },
-  });
-
-  document.ingestionJobId = job.id;
-  document.ingestionStatus = job.status;
-  api.saveDocument(document);
-
-  startIngestionWorker();
+  api.applyDocumentFromServer(document);
   return document;
 }
 
 /**
- * Replaces an existing document's source file in place — same documentId, same
- * metadata (title/tag/permissions untouched), new content. Re-enqueues an
- * ingestion job against the existing document so the pipeline overwrites its
- * blocks/toc when parsing completes, the same way a Drive re-sync updates a
- * document in place rather than creating a new one.
+ * Uploads a replacement file as a new version of an existing document —
+ * same documentId, same metadata (title/tag/permissions untouched), new
+ * Drive file. The prior version's row is never mutated; only the document's
+ * current-version pointer advances.
  */
 export async function replaceDocumentFile(user: User, documentId: string, file: File): Promise<Document> {
   requireAuthenticatedUser(user);
   requireEditingPermission(user);
 
-  const document = getDocumentById(documentId);
-  if (!document) throw new Error("Document not found.");
-
-  const uploadMetadata = await api.saveUploadFileToStorage(file, user.id, {
-    tag:          document.tag,
-    departmentId: document.departmentId,
-  });
-
-  const parserType =
-    getParserByMimeType(uploadMetadata.mimeType || file.type)?.parserType ??
-    getParserByExtension(file.name.split(".").pop()?.toLowerCase())?.parserType ??
-    "plainText";
-
-  Object.assign(document, {
-    rawSourceUrl:    uploadMetadata.rawSourceUrl,
-    previewUrl:      uploadMetadata.previewUrl,
-    mimeType:        uploadMetadata.mimeType,
-    storageBucket:   uploadMetadata.storageBucket,
-    storagePath:     uploadMetadata.storagePath,
-    storageSize:     uploadMetadata.storageSize,
-    uploadedBy:      uploadMetadata.uploadedBy,
-    parserStatus:    "pending",
-    lifecycleState:  "processing",
-    ingestionStatus: "queued",
-    updatedAt:       formatDocumentDate(),
-    updatedById:     user.id,
-  });
-
-  const job = enqueueIngestionJob({
-    documentId: document.id,
-    sourceType: "localUpload",
-    parserType,
-    sourceUrl:  uploadMetadata.rawSourceUrl,
-    fileName:   file.name,
-    mimeType:   uploadMetadata.mimeType || file.type,
-    file,
-    metadata: {
-      authorId:     document.authorId,
-      departmentId: document.departmentId,
-      tag:          document.tag,
-    },
-  });
-
-  document.ingestionJobId = job.id;
-  document.ingestionStatus = job.status;
-  api.saveDocument(document);
+  const document = await uploadDocumentNewVersion(documentId, file);
+  api.applyDocumentFromServer(document);
 
   recordActivity({
     userId:     user.id,
@@ -2692,13 +2459,10 @@ export async function replaceDocumentFile(user: User, documentId: string, file: 
     metadata:   { title: document.title, fileName: file.name },
   });
 
-  startIngestionWorker();
   return document;
 }
 
-
-
-export function updateDocumentMetadata(
+export async function updateDocumentMetadata(
   user: User,
   documentId: string,
   updates: Partial<
@@ -2712,22 +2476,15 @@ export function updateDocumentMetadata(
       | "allowedUserTypes"
       | "allowedDepartments"
       | "allowedTeamIds"
-      | "pinned"
     >
   >,
-): Document {
+): Promise<Document> {
   requireAuthenticatedUser(user);
   requireEditingPermission(user);
 
-  const document = getDocumentById(documentId);
-  if (!document) throw new Error("Document not found.");
+  const document = await updateDocument(documentId, updates);
+  api.applyDocumentFromServer(document);
 
-  Object.assign(document, updates, {
-    updatedAt:   formatDocumentDate(),
-    updatedById: user.id,
-  });
-
-  api.saveDocument(document);
   recordActivity({
     userId:     user.id,
     action:     "DOCUMENT_UPDATED",
