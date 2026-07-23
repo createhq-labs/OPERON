@@ -14,13 +14,20 @@ export const dynamic = "force-dynamic";
 async function lookupActiveProfile(authUserId: string) {
   if (!supabaseAdmin) return null;
 
-  const { data } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .schema("global")
     .from("users")
     .select("*, role:roles(name)")
     .eq("id", authUserId)
     .eq("status", "active")
     .maybeSingle();
+
+  if (error) {
+    // Surfaced in Vercel's function logs — a query error here was
+    // previously indistinguishable from "no matching row," which masked
+    // real failures as a plain "not provisioned" denial.
+    console.error("[api/auth/session] global.users lookup failed", error);
+  }
 
   return data ? mapGlobalUserRow(data as Record<string, unknown>) : null;
 }
