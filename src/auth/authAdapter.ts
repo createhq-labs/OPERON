@@ -21,6 +21,8 @@ const AUTH_TIMEOUT_MS = 5000;
 interface AuthSession {
   userId: string;
   email: string;
+  /** Needed to call /api/auth/session as this user, not as anonymous. */
+  accessToken: string;
   provider?: string;
   expiresAt?: string;
 }
@@ -85,6 +87,40 @@ export function appRoleFromGlobalRole(value: unknown): string {
   return DEFAULT_ROLE_ID;
 }
 
+/**
+ * Maps a raw global.users row (joined with role:roles(name)) to the domain
+ * User type. All fields are coerced defensively — a partial row must never
+ * produce an object that passes RBAC checks with elevated privileges.
+ * Shared by the bootstrap-auth path here and by /api/auth/session
+ * server-side, so both resolve identity the same way.
+ */
+export function mapGlobalUserRow(row: Record<string, unknown>): User {
+  const role = Array.isArray(row.role) ? row.role[0] : row.role;
+  const roleName = typeof role === "object" && role !== null
+    ? coerceString((role as Record<string, unknown>).name)
+    : "";
+  return {
+    id: coerceString(row.id),
+    name:
+      coerceString(row.full_name) ||
+      normalizeEmail(row.email as string | undefined),
+    email: normalizeEmail(row.email as string | undefined),
+    avatar: "",
+    userType: roleName.trim().toLowerCase() === "creator" ? "creator" : "employee" as UserType,
+    roleId: appRoleFromGlobalRole(row.role),
+    roleName,
+    globalRoleId: coerceString(row.role_id) || undefined,
+    departmentId: (coerceString(row.department_id) || undefined) as DeptId | undefined,
+    teamId: coerceString(row.department_id) || undefined,
+    supervisorId: coerceString(row.manager_user_id) || undefined,
+    designationId: coerceString(row.designation_id) || undefined,
+    permissionIds: coerceStringArray(row.permission_ids) as PermissionId[],
+    createdById: coerceString(row.created_by),
+    status: coerceString(row.status, "active") as UserStatus,
+    dateJoined: coerceString(row.joined_at) || undefined,
+  };
+}
+
 // ─── Supabase Auth Adapter ────────────────────────────────────────────────────
 
 class SupabaseAuthAdapter implements AuthAdapter {
@@ -100,11 +136,13 @@ class SupabaseAuthAdapter implements AuthAdapter {
 
       if (result.error || !result.data?.session?.user) return null;
 
-      const { user, expires_at } = result.data.session;
+      const { user, expires_at, access_token } = result.data.session;
+      if (!access_token) return null;
 
       return {
         userId: user.id,
         email: normalizeEmail(user.email),
+        accessToken: access_token,
         provider: "supabase",
         expiresAt: expires_at
           ? new Date(expires_at * 1000).toISOString()
@@ -114,39 +152,6 @@ class SupabaseAuthAdapter implements AuthAdapter {
       logRuntimeWarning("Supabase auth session check failed", { error });
       return null;
     }
-  }
-
-  /**
-   * Maps a raw public.users row (the Finance Dashboard's real identity
-   * table — full_name/role/business_line/team_lead_id/team_name, real uuid
-   * `id`, no permission_ids column) to the domain User type. All fields are
-   * coerced defensively — a partial row must never produce an object that
-   * passes RBAC checks with elevated privileges.
-   */
-  private mapSupabaseUser(row: Record<string, unknown>): User {
-    const role = Array.isArray(row.role) ? row.role[0] : row.role;
-    const roleName = typeof role === "object" && role !== null
-      ? coerceString((role as Record<string, unknown>).name)
-      : "";
-    return {
-      id: coerceString(row.id),
-      name:
-        coerceString(row.full_name) ||
-        normalizeEmail(row.email as string | undefined),
-      email: normalizeEmail(row.email as string | undefined),
-      avatar: "",
-      userType: roleName.trim().toLowerCase() === "creator" ? "creator" : "employee" as UserType,
-      roleId: appRoleFromGlobalRole(row.role),
-      roleName,
-      departmentId: (coerceString(row.department_id) || undefined) as DeptId | undefined,
-      teamId: coerceString(row.department_id) || undefined,
-      supervisorId: coerceString(row.manager_user_id) || undefined,
-      designationId: coerceString(row.designation_id) || undefined,
-      permissionIds: coerceStringArray(row.permission_ids) as PermissionId[],
-      createdById: coerceString(row.created_by),
-      status: coerceString(row.status, "active") as UserStatus,
-      dateJoined: coerceString(row.joined_at) || undefined,
-    };
   }
 
   /**
@@ -184,7 +189,7 @@ class SupabaseAuthAdapter implements AuthAdapter {
         return null;
       }
 
-      return this.mapSupabaseUser(data as Record<string, unknown>);
+      return mapGlobalUserRow(data as Record<string, unknown>);
     } catch (error) {
       logRuntimeWarning("Bootstrap auth query failed", { error });
       return null;
@@ -197,65 +202,44 @@ class SupabaseAuthAdapter implements AuthAdapter {
   }
 
   /**
-   * Looks up an existing global.users profile by auth user ID. Must filter
-   * on status='active' — a non-active row (e.g. a disabled account) must
-   * never resolve as a fully authorized user here. This mirrors the same
-   * filter getBootstrapUser() already applies.
+   * Identity resolution (profile lookup + invitation consumption) never
+   * runs as a direct client query against global.users/workforce.* — the
+   * `authenticated` role has no grants on external tables like global.users
+   * (they predate this app and were never covered by any of its own
+   * migrations), and consume_employee_invitation() requires a real per-user
+   * auth.uid() context a service-role call can't provide either. Both are
+   * resolved server-side by /api/auth/session instead, mirroring how
+   * /api/documents/* already resolves identity for the Drive-backed
+   * document system — the browser only ever calls a trusted backend route,
+   * never Postgres directly, for anything permission-sensitive.
    */
-  private async lookupProfile(authUserId: string): Promise<User | null> {
-    const { data: existing, error: selectError } = await withTimeout(
-      supabase
-        .schema("global")
-        .from("users")
-        .select("*, role:roles(name)")
-        .eq("id", authUserId)
-        .eq("status", "active")
-        .maybeSingle(),
+  private async resolveIdentityFromBackend(accessToken: string): Promise<IdentityResult> {
+    const response = await withTimeout(
+      fetch("/api/auth/session", {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }).then((res) => res.json()),
       AUTH_TIMEOUT_MS,
-      { data: null, error: { code: "AUTH_TIMEOUT", message: "User profile lookup timed out." } } as never,
+      { kind: "none" } as IdentityResult,
     );
 
-    if (selectError) {
-      logRuntimeWarning("Failed to query user profile", { error: selectError });
+    if (
+      response &&
+      typeof response === "object" &&
+      (response.kind === "authenticated" || response.kind === "not_invited" || response.kind === "none")
+    ) {
+      return response as IdentityResult;
     }
 
-    return existing ? this.mapSupabaseUser(existing as Record<string, unknown>) : null;
+    logRuntimeWarning("Unexpected /api/auth/session response shape", { response });
+    return { kind: "none" };
   }
 
   async resolveIdentity(): Promise<IdentityResult> {
     try {
       const session = await this.getSession();
 
-      if (session?.userId && session.email) {
-        const existing = await this.lookupProfile(session.userId);
-
-        if (existing) {
-          return { kind: "authenticated", user: existing };
-        }
-
-        // No global.users row yet. Self-signup isn't supported — the only
-        // way in is a matching HR-created invitation. This is the ONLY
-        // code path that ever writes to global.users, and it only ever
-        // acts on this session's own identity (auth.uid()), never a
-        // client-supplied target.
-        const { data: linked, error: consumeError } = await withTimeout(
-          supabase.schema("workforce").rpc("consume_employee_invitation"),
-          AUTH_TIMEOUT_MS,
-          { data: null, error: { code: "AUTH_TIMEOUT", message: "Invitation check timed out." } } as never,
-        );
-
-        if (consumeError) {
-          logRuntimeWarning("Failed to check employee invitation", { error: consumeError });
-        }
-
-        if (linked) {
-          const provisioned = await this.lookupProfile(session.userId);
-          if (provisioned) {
-            return { kind: "authenticated", user: provisioned };
-          }
-        }
-
-        return { kind: "not_invited", email: session.email };
+      if (session?.userId && session.email && session.accessToken) {
+        return await this.resolveIdentityFromBackend(session.accessToken);
       }
 
       // No real session — fall back to bootstrap mode (dev only).
