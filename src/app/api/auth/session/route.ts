@@ -1,11 +1,10 @@
 import "server-only";
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { createUserScopedClient } from "@/lib/supabaseUserScoped";
 import { mapGlobalUserRow, type IdentityResult } from "@/auth/authAdapter";
 
-// Reads global.users/workforce.* — needs the service-role client, which
-// isn't edge-compatible.
+// Reads global.users — needs the service-role client, which isn't
+// edge-compatible.
 export const runtime = "nodejs";
 // A GET handler with no searchParams usage would otherwise be a candidate
 // for static optimization — every request here is per-user (keyed on the
@@ -28,14 +27,15 @@ async function lookupActiveProfile(authUserId: string) {
 
 /**
  * The single, trusted place identity actually gets resolved. The browser
- * never queries global.users or calls consume_employee_invitation()
- * directly — see the comment on authAdapter.ts's resolveIdentity() for why.
- * Two different privilege levels are needed here, not one:
- *   - the profile lookup runs as the service role (bypasses grants/RLS,
- *     safe because the row is filtered to the token's own verified id)
- *   - consume_employee_invitation() must run as the real user, since its
- *     SECURITY DEFINER body reads auth.uid() to know who's calling it —
- *     a service-role call has no per-user identity to give it.
+ * never queries global.users directly — see the comment on
+ * authAdapter.ts's resolveIdentity() for why. Runs as the service role,
+ * which bypasses grants/RLS safely here since the row is filtered to the
+ * token's own verified id, never a client-supplied one.
+ *
+ * There is no self-service provisioning path: a global.users row must
+ * already exist (HR creates it directly, alongside the person's
+ * auth.users entry, before their first login) — anyone without a
+ * matching row gets a hard "not_invited" denial.
  */
 export async function GET(request: NextRequest): Promise<NextResponse<IdentityResult>> {
   if (!supabaseAdmin) {
@@ -57,22 +57,6 @@ export async function GET(request: NextRequest): Promise<NextResponse<IdentityRe
     const existing = await lookupActiveProfile(authData.user.id);
     if (existing) {
       return NextResponse.json({ kind: "authenticated", user: existing });
-    }
-
-    // No global.users row yet. Self-signup isn't supported — the only way
-    // in is a matching HR-created invitation. This is the ONLY code path
-    // that ever writes to global.users, and it only ever acts on the
-    // caller's own identity (auth.uid()), never a client-supplied target.
-    const userScoped = createUserScopedClient(token);
-    const linked = userScoped
-      ? (await userScoped.schema("workforce").rpc("consume_employee_invitation")).data
-      : null;
-
-    if (linked) {
-      const provisioned = await lookupActiveProfile(authData.user.id);
-      if (provisioned) {
-        return NextResponse.json({ kind: "authenticated", user: provisioned });
-      }
     }
 
     const email = authData.user.email?.trim().toLowerCase() ?? "";

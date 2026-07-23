@@ -10,42 +10,38 @@ until the live identity and `global.users` RLS checks below pass.**
 Both password and Google authentication converge on the same path:
 
 Self-signup is disabled — there is no "create account" path for either
-password or Google authentication. HR provisions an employee's full record
-(role, department, designation, manager, joining date, employment status)
-*before* the person ever logs in, via an invitation created at
-`/workforce/invitations`. Both password and Google authentication converge on
-the same path after that:
+password or Google authentication, and no invitation/auto-provisioning
+mechanism either. HR provisions an employee's full record directly, before
+the person ever logs in: an `auth.users` entry (Supabase dashboard →
+Authentication → Users) *and* a matching `global.users` row (same UUID,
+per the identity rule) with role/department/designation/manager/joining
+date already set — the same way the pre-existing Finance Dashboard
+provisions its own `public.users` rows.
 
 1. Supabase Auth creates or restores `auth.users` and a session (Google will
    still create this row for anyone who clicks the button, invited or not —
-   inherent to Supabase-managed OAuth; see step 5).
-2. `SupabaseAuthAdapter.resolveIdentity()` selects `global.users` where
-   `global.users.id = session.user.id` and `status = active` (`getCurrentUser()`
-   is a thin wrapper over this for backward compatibility).
-3. `global.roles.name` is loaded through `global.users.role_id`.
+   inherent to Supabase-managed OAuth; there is no further provisioning step
+   this can trigger).
+2. `SupabaseAuthAdapter.resolveIdentity()` calls `/api/auth/session` (server
+   route, service-role client) rather than querying `global.users` directly
+   from the browser — the `authenticated` role has no grants on that table
+   (it predates this app and was never covered by any of its own
+   migrations), so a direct client query 403s. The route looks up
+   `global.users` where `id = session.user.id` and `status = 'active'`.
+3. `global.roles.name` is loaded through `global.users.role_id` in that same
+   server-side query.
 4. Centralized capabilities derive UI access from that database role name.
-5. If no `global.users` row exists yet, `resolveIdentity()` calls
-   `workforce.consume_employee_invitation()` — the *only* code path that
-   ever writes to `global.users`, and it only ever acts on the calling
-   session's own identity (`auth.uid()`), never a client-supplied target. If
-   the caller's email matches a pending invitation, it atomically creates
-   `global.users` + `workforce.employment_details` from what HR already
-   entered and marks the invitation consumed; `resolveIdentity()` then
-   returns the newly authenticated user. If no invitation matches, it
-   returns `false` and touches nothing — `resolveIdentity()` returns a
-   `"not_invited"` result instead of `null`, and `authContext.tsx` surfaces
-   `status: "not_invited"` with a hard "contact HR" denial screen — no
-   queue, no waiting state, no Workforce chrome, no protected routes. See
-   `supabase-migrations/workforce-rebuild/008_workforce_employee_invitations.sql`.
+5. If no `global.users` row exists, the route returns `{kind: "not_invited",
+   email}` — a hard denial, nothing is written anywhere.
+   `authContext.tsx` surfaces `status: "not_invited"` with a "contact HR"
+   denial screen — no queue, no waiting state, no Workforce chrome, no
+   protected routes.
 
-Invitation metadata is never trusted over the authenticated session itself —
-`consume_employee_invitation()` prefers the real name from the auth
-provider's own metadata over HR's pre-filled guess. The browser never
-creates `global.users`, assigns roles, departments, managers, or permissions
-directly — the one and only write path is `consume_employee_invitation()`,
-and the one and only place a role is ever *chosen* is
-`create_employee_invitation()`, gated on `can_manage_onboarding()` plus an
-admin-only check for assigning any HR/founder-tier role.
+The browser never creates `global.users` rows, assigns roles, departments,
+managers, or permissions directly, and never queries `global.users` itself —
+`/api/auth/session` is the only place identity is ever resolved, mirroring
+how `/api/documents/*` already resolves identity for the Drive-backed
+document system.
 
 ## Central role mapping
 

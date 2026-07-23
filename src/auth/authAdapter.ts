@@ -33,11 +33,12 @@ interface AuthSubscription {
 
 /**
  * Tri-state identity result — distinguishes "no session at all" from
- * "authenticated with Supabase but no global.users row exists, and no
- * employee invitation matched this email either" (which getCurrentUser()
- * alone collapses to the same `null` as "not signed in", losing the
- * information authContext needs to show a clear "contact HR" denial
- * instead of silently bouncing to /login).
+ * "authenticated with Supabase but no global.users row exists yet" (which
+ * getCurrentUser() alone collapses to the same `null` as "not signed in",
+ * losing the information authContext needs to show a clear "contact HR"
+ * denial instead of silently bouncing to /login). There is no self-service
+ * provisioning path — HR creates the global.users row directly, alongside
+ * the person's auth.users entry, before their first login.
  */
 export type IdentityResult =
   | { kind: "authenticated"; user: User }
@@ -202,13 +203,10 @@ class SupabaseAuthAdapter implements AuthAdapter {
   }
 
   /**
-   * Identity resolution (profile lookup + invitation consumption) never
-   * runs as a direct client query against global.users/workforce.* — the
-   * `authenticated` role has no grants on external tables like global.users
-   * (they predate this app and were never covered by any of its own
-   * migrations), and consume_employee_invitation() requires a real per-user
-   * auth.uid() context a service-role call can't provide either. Both are
-   * resolved server-side by /api/auth/session instead, mirroring how
+   * Identity resolution never runs as a direct client query against
+   * global.users — the `authenticated` role has no grants on it (it
+   * predates this app and was never covered by any of its own migrations).
+   * Resolved server-side by /api/auth/session instead, mirroring how
    * /api/documents/* already resolves identity for the Drive-backed
    * document system — the browser only ever calls a trusted backend route,
    * never Postgres directly, for anything permission-sensitive.

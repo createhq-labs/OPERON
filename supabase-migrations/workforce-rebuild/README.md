@@ -13,23 +13,16 @@ Before using the web application:
 
 1. Expose the `global` and `workforce` schemas through the Supabase API.
 2. Enable Email authentication and configure the Google provider if required.
-3. As of `008_workforce_employee_invitations.sql`, self-signup is disabled —
-   HR creates an employee's full record (role, department, designation,
-   manager, joining date, employment status) at `/workforce/invitations`
-   *before* that person ever logs in. On their first successful sign-in with
-   the invited email (Google or password), `workforce.consume_employee_invitation()`
-   automatically links the session to that record — the only code path
-   that ever inserts into `global.users` (same UUID as `auth.users.id`, per
-   the identity rule), and it only ever acts on the caller's own identity.
-   No matching invitation → access denied outright, no queue, no
-   notifications. Browser clients still never create or assign
-   identity/RBAC rows directly; the only place a role is ever chosen is
-   `workforce.create_employee_invitation(...)`, gated on
-   `can_manage_onboarding()` plus an admin-only check for HR/founder-tier
-   roles. This repo does not send the invitation email itself — the invited
-   person can use "Continue with Google" with that address directly, or HR
-   can use Supabase's own dashboard "invite user" feature for password
-   access.
+3. Self-signup is disabled — there is no self-service provisioning path at
+   all. Before anyone's first login, HR/admin creates their `auth.users`
+   entry directly (Supabase dashboard → Authentication → Users → Add user)
+   *and* a matching `global.users` row (same UUID as `auth.users.id`, per
+   the identity rule) with their role/department/designation/manager/
+   joining date already set. `/api/auth/session` (server-side, service-role)
+   is the only place identity ever gets resolved — it looks for that
+   `global.users` row and either returns it or denies access outright
+   ("contact HR") if no matching row exists. No invitation table, no queue,
+   no automatic linking on first login.
 4. Configure the site URL and allowed redirect URLs in Supabase Auth.
 5. The Library's Upload Document / Replace File flow needs **no new
    migration at all** — it's built entirely on tables `001_workforce_foundation.sql`
@@ -84,13 +77,6 @@ select * from workforce.audit_workforce_integrity();
 
 The healthy result is zero rows.
 
-`008_workforce_employee_invitations.sql` requires `global.users.designation_id`
-(confirmed `NOT NULL`, no default on the live schema) — `create_employee_invitation`
-and the `/workforce/invitations` form both require a designation, scoped to
-the selected department via `global.designations.department_id`. Confirmed:
-`global.users` has no `team_id` or `business_line` column — not modeled in
-this migration at all.
-
 ## Recently done
 
 Removed the root-level `supabase-migrations/001`–`010` files (everything
@@ -135,3 +121,27 @@ also leaves the local-upload ingestion/parsing pipeline
 fully orphaned, since the new upload path stores files in Drive without
 running them through that parser — flagged, not removed, since it's a
 separate subsystem this change didn't set out to touch.
+
+Removed the employee-invitation self-provisioning flow entirely —
+`008_workforce_employee_invitations.sql` (never applied to the live
+database), `workforce.employee_invitations`/`create_employee_invitation()`/
+`revoke_employee_invitation()`/`consume_employee_invitation()`,
+`/workforce/invitations` (the HR-facing invitation form), and the
+invitation-specific exports from `src/lib/workforce/invitations.ts`
+(`listAssignableRoles`/`listAssignableDepartments` stay — the document
+upload/edit permission pickers use those independently of invitations).
+HR now provisions `global.users` directly (see step 3 above) rather than
+pre-creating an invitation a first login later consumes — simpler, and it
+matches how the pre-existing Finance Dashboard already provisions
+`public.users` for its own users.
+
+Also fixed the actual login bug this surfaced: `authAdapter.ts` was
+querying `global.users` directly from the browser (anon-key client), which
+the `authenticated` role has never had grants for — that table predates
+this app and was never covered by any of its own migrations. Identity
+resolution now goes through `/api/auth/session` (service-role, server-side)
+instead, the same pattern `/api/documents/*` already uses for the
+Drive-backed document system, and the same pattern Finance's own
+`/api/auth/session` uses against `public.users` — the browser never runs a
+privileged query against Postgres directly for anything permission-
+sensitive.

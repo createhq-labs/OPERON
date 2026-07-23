@@ -175,10 +175,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
         return;
       }
 
-      // Authenticated with Supabase but no matching employee invitation —
-      // resolveIdentity() already attempted to link one (the only code
-      // path that ever writes to global.users). No queue, no waiting
-      // state: this is a hard denial, distinct from "not signed in".
+      // Authenticated with Supabase but no global.users row exists yet —
+      // HR provisions that row directly, there's no self-service path.
+      // No queue, no waiting state: this is a hard denial, distinct from
+      // "not signed in".
       if (identity.kind === "not_invited") {
         if (!mountedRef.current) return;
         window.clearTimeout(fallbackTimer);

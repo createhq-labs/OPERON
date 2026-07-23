@@ -9,7 +9,6 @@ import {
   canAccessWorkforce,
   canAccessPeopleModule,
 } from "@/security/permissions";
-import { capabilitiesFor } from "@/lib/workforce/capabilities";
 import { DashboardRouteShell } from "@/components/DashboardRouteShell";
 import { S } from "@/styles/sharedUi";
 
@@ -17,16 +16,7 @@ const ALL_TABS = [
   { id: "lifecycle",  label: "People",      href: "/workforce/lifecycle" },
   { id: "calendar",   label: "Calendar",    href: "/workforce/calendar" },
   { id: "probation",  label: "Probation",   href: "/workforce/probation" },
-  { id: "invitations", label: "Invitations", href: "/workforce/invitations" },
 ];
-
-// Deliberately bypasses permissions.ts's legacy canManageOnboarding() (which
-// still checks the deprecated HR_ONLY_ROLES/FOUNDER_TIER_ROLES collapse) in
-// favor of the rebuild's 3-tier HR role model directly — this tab/route is
-// new and should never depend on the legacy role system.
-function canManageOnboardingCapability(user: { id: string; roleName?: string; roleId: string; supervisorId?: string }): boolean {
-  return capabilitiesFor({ id: user.id, roleName: user.roleName ?? user.roleId, managerUserId: user.supervisorId }).canManageOnboarding;
-}
 
 export default function WorkforceLayout({ children }: { children: React.ReactNode }) {
   const { user, loaded } = useSession();
@@ -42,10 +32,8 @@ export default function WorkforceLayout({ children }: { children: React.ReactNod
       || pathname?.startsWith("/workforce/onboarding")
       || pathname?.startsWith("/workforce/deboarding");
     const isProbationRoute = pathname?.startsWith("/workforce/probation");
-    const isInvitationsRoute = pathname?.startsWith("/workforce/invitations");
     if (isLifecycleRoute && !canAccessPeopleModule(user)) router.replace("/workforce/calendar");
     if (isProbationRoute && !canSubmitProbationReview(user) && !canDecideProbationReview(user)) router.replace("/workforce/calendar");
-    if (isInvitationsRoute && !canManageOnboardingCapability(user)) router.replace("/workforce/calendar");
   }, [loaded, user, router, pathname]);
 
   if (!loaded) return null;
@@ -53,12 +41,10 @@ export default function WorkforceLayout({ children }: { children: React.ReactNod
 
   const showLifecycle = canAccessPeopleModule(user);
   const showProbation = canSubmitProbationReview(user) || canDecideProbationReview(user);
-  const showInvitations = canManageOnboardingCapability(user);
 
   const tabs = ALL_TABS.filter((tab) => {
     if (tab.id === "lifecycle") return showLifecycle;
     if (tab.id === "probation") return showProbation;
-    if (tab.id === "invitations") return showInvitations;
     return true;
   });
 
