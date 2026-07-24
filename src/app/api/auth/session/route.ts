@@ -2,6 +2,8 @@ import "server-only";
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { mapGlobalUserRow, type IdentityResult } from "@/auth/authAdapter";
+import { fetchRolePermissionNames } from "@/lib/workforcePermissionLookup";
+import type { PermissionId } from "@/core/types";
 
 // Reads global.users — needs the service-role client, which isn't
 // edge-compatible.
@@ -29,7 +31,14 @@ async function lookupActiveProfile(authUserId: string) {
     console.error("[api/auth/session] global.users lookup failed", error);
   }
 
-  return data ? mapGlobalUserRow(data as Record<string, unknown>) : null;
+  if (!data) return null;
+
+  const user = mapGlobalUserRow(data as Record<string, unknown>);
+  const permissionIds = user.globalRoleId
+    ? await fetchRolePermissionNames(supabaseAdmin.schema("global"), user.globalRoleId)
+    : [];
+
+  return { ...user, permissionIds: permissionIds as PermissionId[] };
 }
 
 /**

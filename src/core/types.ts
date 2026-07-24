@@ -35,15 +35,15 @@ export type PermissionId =
   | "view_creator_ops"
   | "view_brand"
   | "view_operations"
-  | "approve_leave_tl"
+  | "approve_leave_team_lead"
   | "approve_leave_hr"
   | "manage_hr_calendar"
-  | "view_hr_records_all"
+  | "view_all_hr_records"
   | "submit_probation_review"
   | "decide_probation_review"
   | "acknowledge_deboarding"
-  | "approve_deboarding_employee_track"
-  | "flag_deboarding_any"
+  | "approve_employee_track_deboarding"
+  | "flag_deboarding"
   | "view_team_leave_history"
   | "manage_people"
   | "manage_onboarding";
@@ -128,9 +128,13 @@ export interface User {
   /** Real global.roles.id UUID — distinct from roleId, which is a lossy 5-value collapse of it. Needed for document_allowed_roles-style checks against the real role catalog. */
   globalRoleId?:  string;
   departmentId?:  DeptId;
+  /** Real global.departments.name, alongside departmentId's UUID — populated only where the real catalog is used directly (e.g. /api/workforce/employees), not by the legacy departmentStore lookups. */
+  departmentName?: string;
   teamId?:        string;
   supervisorId?:  string;
   designationId?: string;
+  /** Real global.designations.name, alongside designationId's UUID — same population caveat as departmentName. */
+  designationName?: string;
   permissionIds:  PermissionId[];
   createdById:    string;
   status:         UserStatus;

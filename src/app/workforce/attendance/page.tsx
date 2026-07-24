@@ -429,7 +429,7 @@ export default function AttendancePage() {
 
           {/* HR Org Matrix — stays visible; clicking a row opens a slide-over rather than replacing this. */}
           {viewMode === "org" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: Sp["5"] }}>
               <OrgSummaryCards users={allOrgUsers} recordByUser={todayRecordByUser} leaveRequests={teamLeaveRequests} />
               <AttendanceMatrix
                 month={month}
@@ -467,7 +467,7 @@ export default function AttendancePage() {
 
           {/* My Calendar (employee + TL/HR personal tab) */}
           {viewMode === "my" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: Sp["4"] }}>
               <MonthlyCalendar
                 month={month}
                 targetUser={user}
@@ -677,7 +677,7 @@ function AttendanceMatrix({
   const stickyBg = "var(--op-surface)";
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: Sp["4"] }}>
 
       {/* Floating toolbar (HR only) */}
       {showFilters && (

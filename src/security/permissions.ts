@@ -1,17 +1,24 @@
 import type { User, VisibilityScope } from "@/core/types";
 import { hasPermission, isAdmin } from "@/core/operon";
-import {
-  DRIVE_MANAGER_ROLES,
-  USER_MANAGER_ROLES,
-  TL_ROLES,
-  HR_ONLY_ROLES,
-  FOUNDER_TIER_ROLES,
-  WORKFORCE_ADMIN_ROLES,
-} from "@/security/rolePolicies";
-import { capabilitiesFor } from "@/lib/workforce/capabilities";
+import { capabilitiesFor, normalizeRoleName } from "@/lib/workforce/capabilities";
 
 function workforceCapabilities(user: User) {
-  return capabilitiesFor({ id: user.id, roleName: user.roleName ?? user.roleId, managerUserId: user.supervisorId });
+  return capabilitiesFor({
+    id: user.id,
+    roleName: user.roleName ?? user.roleId,
+    managerUserId: user.supervisorId,
+    permissionIds: user.permissionIds,
+  });
+}
+
+/**
+ * The handful of actions with no corresponding row in the real permission
+ * catalog (probation decisions, Drive config, founder-tier leave approval)
+ * stay tied to the real Co-Founder identity rather than any permission —
+ * by explicit decision, not a stand-in for a missing permission to add.
+ */
+function isCoFounder(user: User): boolean {
+  return normalizeRoleName(user.roleName ?? user.roleId) === "co founder";
 }
 
 // ─── Document Permissions ─────────────────────────────────────────────────────
@@ -36,7 +43,7 @@ export function canUploadDocument(user: User | null | undefined): boolean {
  */
 export function canManageResources(user: User | null | undefined): boolean {
   if (!user) return false;
-  return workforceCapabilities(user).canManageContent;
+  return workforceCapabilities(user).canManageResources;
 }
 
 export function canViewResources(user: User | null | undefined): boolean {
@@ -50,10 +57,7 @@ export function canViewResources(user: User | null | undefined): boolean {
  */
 export function canManageUsers(user: User | null | undefined): boolean {
   if (!user) return false;
-  return (
-    hasPermission(user, "manage_users") ||
-    USER_MANAGER_ROLES.has(user.roleId as never)
-  );
+  return hasPermission(user, "manage_users") || isCoFounder(user);
 }
 
 // ─── Publishing ───────────────────────────────────────────────────────────────
@@ -72,11 +76,12 @@ export function canViewActivity(user: User | null | undefined): boolean {
 
 /**
  * Whether the user may configure the Google Drive integration.
- * Uses DRIVE_MANAGER_ROLES as the canonical policy set — not a hardcoded list.
+ * No permission row exists for this in the real catalog — Co-Founder only,
+ * by explicit decision (see isCoFounder above).
  */
 export function canManageDrive(user: User | null | undefined): boolean {
   if (!user) return false;
-  return DRIVE_MANAGER_ROLES.has(user.roleId as never);
+  return isCoFounder(user);
 }
 
 // ─── HR ────────────────────────────────────────────────────────────────────────
@@ -88,27 +93,24 @@ export function canManageDrive(user: User | null | undefined): boolean {
  */
 export function canApproveLeaveAsTl(user: User | null | undefined): boolean {
   if (!user) return false;
-  return (
-    hasPermission(user, "approve_leave_tl") ||
-    TL_ROLES.has(user.roleId as never) ||
-    // Founders act as direct managers for HR/Finance direct reports and
-    // are their final approver (bypass the standard TL→HR step).
-    FOUNDER_TIER_ROLES.has(user.roleId as never)
-  );
+  return hasPermission(user, "approve_leave_team_lead") || isCoFounder(user);
 }
 
 /**
- * HR-step leave approval. Deliberately HR-only — Cofounder/Admin do not
- * action this step (separation of duties), unlike most other HR module grants.
+ * HR-step leave approval, driven by the real approve_leave_hr permission.
  */
 export function canApproveLeaveAsHr(user: User | null | undefined): boolean {
   if (!user) return false;
-  return hasPermission(user, "approve_leave_hr") || HR_ONLY_ROLES.has(user.roleId as never);
+  return hasPermission(user, "approve_leave_hr") || isCoFounder(user);
 }
 
+/**
+ * Founder-tier final approver — bypasses the standard TL→HR chain. No
+ * permission row exists for this; Co-Founder only, by explicit decision.
+ */
 export function canApproveLeaveAsFounder(user: User | null | undefined): boolean {
   if (!user) return false;
-  return FOUNDER_TIER_ROLES.has(user.roleId as never);
+  return isCoFounder(user);
 }
 
 export function canManageHrCalendar(user: User | null | undefined): boolean {
@@ -119,40 +121,38 @@ export function canManageHrCalendar(user: User | null | undefined): boolean {
 /** Whether the user can view HR records (onboarding/leave/attendance) for everyone, not just themselves. */
 export function canViewAllHrRecords(user: User | null | undefined): boolean {
   if (!user) return false;
-  return (
-    hasPermission(user, "view_hr_records_all") ||
-    HR_ONLY_ROLES.has(user.roleId as never) ||
-    FOUNDER_TIER_ROLES.has(user.roleId as never)
-  );
+  return hasPermission(user, "view_all_hr_records") || isCoFounder(user);
 }
 
-/** HR submits a probation review for Co-Founder/Admin to decide — submission only, no outcome authority. */
+/** HR submits a probation review for Co-Founder to decide — submission only, no outcome authority. */
 export function canSubmitProbationReview(user: User | null | undefined): boolean {
   if (!user) return false;
   return workforceCapabilities(user).canManageProbation;
 }
 
-/** Only Co-Founder/Admin decide probation outcomes — deliberately excludes HR. */
+/**
+ * Only Co-Founder decides probation outcomes — deliberately excludes HR.
+ * HR's real workflow is: get notified a probation is due, flag the person,
+ * and send the request to the Co-Founder to approve or reject. The real
+ * decide_probation_review permission row on HR Manager does not grant
+ * decision authority here, by explicit decision.
+ */
 export function canDecideProbationReview(user: User | null | undefined): boolean {
   if (!user) return false;
   return workforceCapabilities(user).canFinalizeProbation;
 }
 
-/** Employee-track deboarding requires Co-Founder/Admin approval before HR can complete it. */
+/** Employee-track deboarding requires Co-Founder approval before HR can complete it. */
 export function canApproveDeboardingEmployeeTrack(user: User | null | undefined): boolean {
   if (!user) return false;
-  return hasPermission(user, "approve_deboarding_employee_track") || FOUNDER_TIER_ROLES.has(user.roleId as never);
+  return hasPermission(user, "approve_employee_track_deboarding") || isCoFounder(user);
 }
 
 
 /** Whether the user can view their direct reports' full leave/WFH history, not just the live approval queue. */
 export function canViewTeamLeaveHistory(user: User | null | undefined): boolean {
   if (!user) return false;
-  return (
-    hasPermission(user, "view_team_leave_history") ||
-    TL_ROLES.has(user.roleId as never) ||
-    FOUNDER_TIER_ROLES.has(user.roleId as never)
-  );
+  return hasPermission(user, "view_team_leave_history") || isCoFounder(user);
 }
 
 /**
@@ -162,30 +162,20 @@ export function canViewTeamLeaveHistory(user: User | null | undefined): boolean 
  */
 export function canManagePeople(user: User | null | undefined): boolean {
   if (!user) return false;
-  return (
-    hasPermission(user, "manage_people") ||
-    WORKFORCE_ADMIN_ROLES.has(user.roleId as never)
-  );
+  return hasPermission(user, "manage_people") || isCoFounder(user);
 }
 
 /** Whether the user can reject/send back an onboarding submission for revision. */
 export function canManageOnboarding(user: User | null | undefined): boolean {
   if (!user) return false;
-  return (
-    hasPermission(user, "manage_onboarding") ||
-    HR_ONLY_ROLES.has(user.roleId as never) ||
-    FOUNDER_TIER_ROLES.has(user.roleId as never)
-  );
+  return hasPermission(user, "manage_onboarding") || isCoFounder(user);
 }
 
 // ─── People Module (Lifecycle) ────────────────────────────────────────────────
 
 /**
- * People module access: all workforce admins.
- * Previously also granted to the literal Creator Acquisition role, which no
- * longer exists post role-collapse (see rolePolicies.ts) — there's no
- * department/team signal reliable enough to stand in for it, so that
- * special-case is dropped rather than guessed at.
+ * People module access: everyone with the real manage_people permission
+ * (or Co-Founder).
  */
 export function canAccessPeopleModule(user: User | null | undefined): boolean {
   if (!user) return false;
@@ -193,9 +183,7 @@ export function canAccessPeopleModule(user: User | null | undefined): boolean {
 }
 
 /**
- * Founders may submit a creator deboarding request.
- * Previously also granted to the literal Creator Acquisition role — dropped
- * for the same reason as canAccessPeopleModule above.
+ * Whether the user may submit a creator deboarding request.
  */
 export function canSubmitCreatorDeboarding(user: User | null | undefined): boolean {
   if (!user) return false;
@@ -203,17 +191,17 @@ export function canSubmitCreatorDeboarding(user: User | null | undefined): boole
 }
 
 /**
- * Team Lead tier (and Founders) approve and complete creator deboarding.
- * TM Team Lead and Senior TM both collapsed into the single `team_lead`
- * role — this now also includes IM Team Lead, which didn't have this
- * authority before the collapse.
+ * Whether the user may approve and complete creator deboarding. The real
+ * permission catalog doesn't separate creator-track from employee-track
+ * deboarding approval — this shares the one generic permission with
+ * canApproveDeboardingEmployeeTrack.
  */
 export function canApproveCreatorDeboarding(user: User | null | undefined): boolean {
   if (!user) return false;
   return workforceCapabilities(user).canApproveCreatorDeboarding;
 }
 
-/** HR (and Founders) initiate and complete employee deboarding. */
+/** HR (and Co-Founder) initiate and complete employee deboarding. */
 export function canInitiateEmployeeDeboarding(user: User | null | undefined): boolean {
   if (!user) return false;
   return workforceCapabilities(user).canInitiateEmployeeDeboarding;

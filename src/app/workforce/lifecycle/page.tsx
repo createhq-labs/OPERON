@@ -1,38 +1,28 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { useEffect, useMemo, useState } from "react";
+import { motion } from "framer-motion";
 import type { LucideIcon } from "lucide-react";
 import { UserPlus2, UserRound, Briefcase, Users, ShieldCheck, CircleAlert } from "lucide-react";
-import type { DeboardingRecord, DeptId, OnboardingRecord, Role, RoleId, Team, User, UserStatus } from "@/core/operon";
+import type { DeboardingRecord, DeptId, OnboardingRecord, User, UserStatus } from "@/core/operon";
 import { useSession } from "@/auth/useSession";
 import {
   acknowledgeOnboarding,
   approveCreatorDeboarding,
-  approveEmployeeDeboarding,
   completeCreatorDeboarding,
-  completeEmployeeDeboarding,
   completeOnboarding,
-  createUser,
-  getCreatableRoles,
   getDeboardingRecords,
-  getDepartmentLabel,
   getDepartments,
   getMyDirectReports,
   getOnboardingRecords,
-  getRoleLabel,
-  getTeams,
   getUserById,
   getUsers,
   rejectOnboarding,
   submitCreatorDeboarding,
-  submitEmployeeDeboarding,
   updateRosterMemberDetails,
 } from "@/core/operon";
 import {
   canApproveCreatorDeboarding,
-  canApproveDeboardingEmployeeTrack,
-  canInitiateEmployeeDeboarding,
   canManageOnboarding,
   canManagePeople,
   canSubmitCreatorDeboarding,
@@ -40,6 +30,14 @@ import {
 } from "@/security/permissions";
 import { StatusPill } from "@/features/workforce/StatusPill";
 import { EmployeeProfilePanel } from "@/features/workforce/EmployeeProfilePanel";
+import {
+  createWorkforceEmployee,
+  getWorkforceDirectoryOptions,
+  generateTemporaryPassword,
+  listWorkforceEmployees,
+  type WorkforceDirectoryOptions,
+  type WorkforceEmployee,
+} from "@/services/workforceEmployees";
 import { S, T } from "@/styles/sharedUi";
 import { motionPreset } from "@/styles/motionPresets";
 
@@ -74,12 +72,13 @@ export default function PeoplePage() {
   const [search, setSearch] = useState("");
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [, forceRefresh] = useState(0);
+  const [realEmployees, setRealEmployees] = useState<WorkforceEmployee[]>([]);
+  const [employeesError, setEmployeesError] = useState("");
+  const [employeesVersion, setEmployeesVersion] = useState(0);
 
   const isHrTier = user ? canViewAllHrRecords(user) : false;
   const canSubmitCreator = user ? canSubmitCreatorDeboarding(user) : false;
   const canApproveDeboard = user ? canApproveCreatorDeboarding(user) : false;
-  const canApproveEmployee = user ? canApproveDeboardingEmployeeTrack(user) : false;
-  const canDoEmployee = user ? canInitiateEmployeeDeboarding(user) : false;
   const canEditPeople = user ? canManagePeople(user) : false;
   const canRunOnboarding = user ? canManageOnboarding(user) : false;
 
@@ -99,6 +98,14 @@ export default function PeoplePage() {
     return map;
   }, [user]);
 
+  useEffect(() => {
+    let cancelled = false;
+    listWorkforceEmployees()
+      .then((rows) => { if (!cancelled) { setRealEmployees(rows); setEmployeesError(""); } })
+      .catch((err) => { if (!cancelled) setEmployeesError(err instanceof Error ? err.message : "Failed to load employees."); });
+    return () => { cancelled = true; };
+  }, [employeesVersion]);
+
   if (!user) return null;
 
   function refresh() {
@@ -107,12 +114,31 @@ export default function PeoplePage() {
 
   const allUsers = getUsers();
   const departments = getDepartments();
-  const teams = getTeams();
-  const creatableRoles = canEditPeople ? getCreatableRoles(user) : [];
   const managerOptions = allUsers.filter((u) => u.status !== "disabled" && u.userType === "employee");
 
-  const employeePool = allUsers.filter((u) => u.userType === "employee");
-  const employees = isHrTier ? employeePool : employeePool.filter((u) => directReportIds.has(u.id));
+  // Employees tab is sourced from the real global.users roster (see
+  // src/services/workforceEmployees.ts) — the backend already scopes rows
+  // to direct reports for a non-HR-tier caller, so no client-side filtering
+  // by directReportIds is needed here (unlike the Creators tab below, which
+  // still runs on the legacy in-memory engine).
+  const employees: User[] = realEmployees.map((e) => ({
+    id: e.id,
+    name: e.name,
+    email: e.email,
+    avatar: "",
+    userType: "employee",
+    roleId: e.roleId,
+    roleName: e.roleName,
+    departmentId: e.departmentId,
+    departmentName: e.departmentName,
+    designationId: e.designationId,
+    designationName: e.designationName,
+    supervisorId: e.supervisorId,
+    permissionIds: [],
+    createdById: "",
+    status: e.status as UserStatus,
+    dateJoined: e.dateJoined,
+  }));
 
   const creatorPool = allUsers.filter((u) => u.userType === "creator");
   const creators = (canApproveDeboard || isHrTier) ? creatorPool : creatorPool.filter((u) => directReportIds.has(u.id));
@@ -170,15 +196,7 @@ export default function PeoplePage() {
 
       {showCreateForm && canEditPeople && (
         <CreateEmployeeForm
-          departments={departments}
-          teams={teams}
-          managerOptions={managerOptions}
-          roleOptions={creatableRoles}
-          onCreate={(input) => {
-            const created = createUser({ creator: user, ...input });
-            if (created) setShowCreateForm(false);
-            return created;
-          }}
+          onCreated={() => setEmployeesVersion((v) => v + 1)}
           onCancel={() => setShowCreateForm(false)}
         />
       )}
@@ -205,38 +223,26 @@ export default function PeoplePage() {
         <PeopleList
           actor={user}
           people={filteredEmployees}
-          emptyMessage="No employees found."
+          emptyMessage={employeesError || "No employees found."}
           deboardingByUserId={deboardingByUserId}
           renderColumns={(person) => (
             <>
-              <InfoCell label="Department" value={person.departmentId ? getDepartmentLabel(person.departmentId) : "-"} />
-              <InfoCell label="Role" value={getRoleLabel(person.roleId)} />
-              <InfoCell label="Manager" value={person.supervisorId ? (getUserById(person.supervisorId)?.name ?? "-") : "-"} />
+              <InfoCell label="Department" value={person.departmentName ?? "-"} />
+              <InfoCell label="Role" value={person.roleName ?? "-"} />
+              <InfoCell label="Manager" value={person.supervisorId ? (person.supervisorId === user.id ? user.name : realEmployees.find((e) => e.id === person.supervisorId)?.name ?? "-") : "-"} />
             </>
           )}
           checklistItems={EMPLOYEE_CHECKLIST}
-          canEditPerson={canEditPeople}
+          canEditPerson={false}
           departments={departments}
           managerOptions={managerOptions}
-          canInitiate={(person, deboard) => canDoEmployee && !deboard && person.status !== "disabled"}
-          canApprove={(_, deboard) => canApproveEmployee && deboard?.status === "pending_founder_approval"}
-          canComplete={(_, deboard) => canDoEmployee && deboard?.status === "data_recovery_pending"}
-          onSavePerson={(person, updates) => {
-            updateRosterMemberDetails(user, person.id, updates);
-            refresh();
-          }}
-          onInitiate={(person, reason) => {
-            submitEmployeeDeboarding(user, person.id, reason || undefined);
-            refresh();
-          }}
-          onApprove={(_, deboardId) => {
-            approveEmployeeDeboarding(user, deboardId);
-            refresh();
-          }}
-          onComplete={(_, deboardId, checklist) => {
-            completeEmployeeDeboarding(user, deboardId, checklist);
-            refresh();
-          }}
+          canInitiate={() => false}
+          canApprove={() => false}
+          canComplete={() => false}
+          onSavePerson={() => {}}
+          onInitiate={() => {}}
+          onApprove={() => {}}
+          onComplete={() => {}}
         />
       )}
 
@@ -601,74 +607,91 @@ function PeopleList({
 }
 
 function CreateEmployeeForm({
-  departments,
-  teams,
-  managerOptions,
-  roleOptions,
-  onCreate,
+  onCreated,
   onCancel,
 }: {
-  departments: Array<{ id: DeptId; name: string }>;
-  teams: Team[];
-  managerOptions: User[];
-  roleOptions: Role[];
-  onCreate: (input: {
-    name: string;
-    email: string;
-    roleId: RoleId;
-    departmentId: DeptId;
-    teamId?: string;
-    supervisorId?: string;
-    status: UserStatus;
-    dateJoined: string;
-    probationRequired: boolean;
-    probationDuration: number;
-    probationDurationUnit: "days" | "months";
-  }) => User | null;
+  onCreated: (employee: WorkforceEmployee) => void;
   onCancel: () => void;
 }) {
-  const [name, setName] = useState("");
+  const [options, setOptions] = useState<WorkforceDirectoryOptions | null>(null);
+  const [optionsError, setOptionsError] = useState("");
+  const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
-  const [roleId, setRoleId] = useState<RoleId>(roleOptions[0]?.id ?? "");
-  const [departmentId, setDepartmentId] = useState<DeptId | "">("");
-  const [teamId, setTeamId] = useState("");
-  const [supervisorId, setSupervisorId] = useState("");
-  const [dateJoined, setDateJoined] = useState(() => new Date().toISOString().slice(0, 10));
-  const [probationRequired, setProbationRequired] = useState(true);
-  const [probationDuration, setProbationDuration] = useState(90);
-  const [probationDurationUnit, setProbationDurationUnit] = useState<"days" | "months">("days");
+  const [roleId, setRoleId] = useState("");
+  const [departmentId, setDepartmentId] = useState("");
+  const [designationId, setDesignationId] = useState("");
+  const [managerUserId, setManagerUserId] = useState("");
+  const [joinedAt, setJoinedAt] = useState(() => new Date().toISOString().slice(0, 10));
+  const [temporaryPassword, setTemporaryPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [successPassword, setSuccessPassword] = useState<{ email: string; password: string } | null>(null);
 
-  const teamsForDepartment = departmentId ? teams.filter((t) => t.departmentId === departmentId) : teams;
+  useEffect(() => {
+    let cancelled = false;
+    getWorkforceDirectoryOptions()
+      .then((opts) => {
+        if (cancelled) return;
+        setOptions(opts);
+        setRoleId((current) => current || opts.roles[0]?.id || "");
+        setDepartmentId((current) => current || opts.departments[0]?.id || "");
+      })
+      .catch((err) => { if (!cancelled) setOptionsError(err instanceof Error ? err.message : "Failed to load role/department options."); });
+    return () => { cancelled = true; };
+  }, []);
 
-  function submit() {
+  async function submit() {
     const errors: Record<string, string> = {};
-    if (!name.trim()) errors.name = "Full name is required.";
+    if (!fullName.trim()) errors.fullName = "Full name is required.";
     if (!email.trim()) errors.email = "Email is required.";
     if (!roleId) errors.roleId = "Role is required.";
     if (!departmentId) errors.departmentId = "Department is required.";
-    if (!dateJoined) errors.dateJoined = "Date joined is required.";
+    if (!joinedAt) errors.joinedAt = "Date joined is required.";
+    if (!temporaryPassword || temporaryPassword.length < 6) errors.temporaryPassword = "A temporary password of at least 6 characters is required.";
 
     setFieldErrors(errors);
     setError("");
     if (Object.keys(errors).length > 0) return;
 
-    const created = onCreate({
-      name,
-      email,
-      roleId,
-      departmentId: departmentId as DeptId,
-      teamId: teamId || undefined,
-      supervisorId: supervisorId || undefined,
-      status: "invited",
-      dateJoined,
-      probationRequired,
-      probationDuration,
-      probationDurationUnit,
-    });
+    setSubmitting(true);
+    try {
+      const created = await createWorkforceEmployee({
+        fullName: fullName.trim(),
+        email: email.trim(),
+        roleId,
+        departmentId,
+        designationId: designationId || undefined,
+        managerUserId: managerUserId || undefined,
+        joinedAt,
+        temporaryPassword,
+      });
+      setSuccessPassword({ email: created.email, password: temporaryPassword });
+      onCreated(created);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create the employee.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
-    if (!created) setError("Unable to create employee — check the fields and your permissions.");
+  if (successPassword) {
+    return (
+      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={motionPreset.page.transition} style={{ ...S.card, padding: "clamp(16px, 2.5vw, 28px)", display: "flex", flexDirection: "column", gap: "14px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "9px" }}>
+          <UserPlus2 size={18} color="var(--op-accent)" />
+          <span style={T.cardTitle}>Employee created</span>
+        </div>
+        <p style={{ fontFamily: "var(--font-body)", fontSize: "var(--text-13)", color: "var(--op-text-2)" }}>
+          Account created for <strong>{successPassword.email}</strong>. Share this temporary password with
+          them so they can sign in — it will not be shown again:
+        </p>
+        <code style={{ ...S.cardInner, padding: "10px 14px", fontFamily: "var(--font-mono)", fontSize: "var(--text-14)", width: "fit-content" }}>{successPassword.password}</code>
+        <div>
+          <button type="button" style={S.btnPrimary} onClick={onCancel}>Done</button>
+        </div>
+      </motion.div>
+    );
   }
 
   return (
@@ -678,9 +701,15 @@ function CreateEmployeeForm({
         <span style={T.cardTitle}>New Employee</span>
       </div>
 
+      {optionsError && (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontFamily: "var(--font-body)", fontSize: "var(--text-12)", color: "var(--color-error)" }}>
+          <CircleAlert size={13} /> {optionsError}
+        </span>
+      )}
+
       <FormSection icon={UserRound} title="Personal Information">
-        <FormField label="Full Name" error={fieldErrors.name}>
-          <input value={name} onChange={(e) => setName(e.target.value)} style={S.input} placeholder="Jordan Lee" />
+        <FormField label="Full Name" error={fieldErrors.fullName}>
+          <input value={fullName} onChange={(e) => setFullName(e.target.value)} style={S.input} placeholder="Jordan Lee" />
         </FormField>
         <FormField label="Email" error={fieldErrors.email}>
           <input value={email} onChange={(e) => setEmail(e.target.value)} style={S.input} placeholder="jordan@example.com" />
@@ -689,75 +718,51 @@ function CreateEmployeeForm({
 
       <FormSection icon={Briefcase} title="Employment Information">
         <FormField label="Role" error={fieldErrors.roleId}>
-          <select value={roleId} onChange={(e) => setRoleId(e.target.value as RoleId)} style={S.select}>
-            {roleOptions.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}
+          <select value={roleId} onChange={(e) => setRoleId(e.target.value)} style={S.select}>
+            {(options?.roles ?? []).map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}
           </select>
         </FormField>
         <FormField label="Department" error={fieldErrors.departmentId}>
-          <select value={departmentId} onChange={(e) => { setDepartmentId(e.target.value as DeptId); setTeamId(""); }} style={S.select}>
-            <option value="">Select department</option>
-            {departments.map((dept) => <option key={dept.id} value={dept.id}>{dept.name}</option>)}
+          <select value={departmentId} onChange={(e) => { setDepartmentId(e.target.value); setDesignationId(""); }} style={S.select}>
+            {(options?.departments ?? []).map((dept) => <option key={dept.id} value={dept.id}>{dept.name}</option>)}
           </select>
         </FormField>
-        <FormField label="Team">
-          <select value={teamId} onChange={(e) => setTeamId(e.target.value)} style={S.select}>
-            <option value="">No team</option>
-            {teamsForDepartment.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
+        <FormField label="Designation">
+          <select value={designationId} onChange={(e) => setDesignationId(e.target.value)} style={S.select}>
+            <option value="">No designation</option>
+            {(options?.designations ?? []).filter((d) => !departmentId || d.departmentId === departmentId).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
           </select>
         </FormField>
-        <FormField label="Date Joined" error={fieldErrors.dateJoined}>
-          <input type="date" value={dateJoined} onChange={(e) => setDateJoined(e.target.value)} style={S.input} />
+        <FormField label="Date Joined" error={fieldErrors.joinedAt}>
+          <input type="date" value={joinedAt} onChange={(e) => setJoinedAt(e.target.value)} style={S.input} />
         </FormField>
       </FormSection>
 
       <FormSection icon={Users} title="Reporting Structure">
         <FormField label="Reporting Manager">
-          <select value={supervisorId} onChange={(e) => setSupervisorId(e.target.value)} style={S.select}>
+          <select value={managerUserId} onChange={(e) => setManagerUserId(e.target.value)} style={S.select}>
             <option value="">No manager</option>
-            {managerOptions.map((manager) => <option key={manager.id} value={manager.id}>{manager.name}</option>)}
+            {(options?.managers ?? []).map((manager) => <option key={manager.id} value={manager.id}>{manager.name}</option>)}
           </select>
         </FormField>
       </FormSection>
 
-      <FormSection icon={ShieldCheck} title="Probation">
-        <FormField label="Probation Required">
+      <FormSection icon={ShieldCheck} title="Account">
+        <FormField label="Temporary Password" error={fieldErrors.temporaryPassword}>
           <div style={{ display: "flex", gap: "6px" }}>
-            <button type="button" style={S.pill(probationRequired) as React.CSSProperties} onClick={() => setProbationRequired(true)}>Yes</button>
-            <button type="button" style={S.pill(!probationRequired) as React.CSSProperties} onClick={() => setProbationRequired(false)}>No</button>
+            <input
+              value={temporaryPassword}
+              onChange={(e) => setTemporaryPassword(e.target.value)}
+              style={S.input}
+              placeholder="Shared with the new hire to sign in"
+            />
+            <button type="button" style={S.btnGhost} onClick={() => setTemporaryPassword(generateTemporaryPassword())}>Generate</button>
           </div>
         </FormField>
-        <AnimatePresence initial={false}>
-          {probationRequired && (
-            <motion.div
-              key="probation-duration"
-              initial={{ opacity: 0, scale: 0.97, height: 0 }}
-              animate={{ opacity: 1, scale: 1, height: "auto" }}
-              exit={{ opacity: 0, scale: 0.97, height: 0 }}
-              transition={motionPreset.fadeScale.transition}
-              style={{ overflow: "hidden" }}
-            >
-              <FormField label="Probation Duration">
-                <div style={{ display: "flex", gap: "6px" }}>
-                  <input
-                    type="number"
-                    min={1}
-                    value={probationDuration}
-                    onChange={(e) => setProbationDuration(Number(e.target.value) || 0)}
-                    style={{ ...S.input, width: "90px" }}
-                  />
-                  <select value={probationDurationUnit} onChange={(e) => setProbationDurationUnit(e.target.value as "days" | "months")} style={S.select}>
-                    <option value="days">Days</option>
-                    <option value="months">Months</option>
-                  </select>
-                </div>
-              </FormField>
-            </motion.div>
-          )}
-        </AnimatePresence>
       </FormSection>
 
       <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-        <button type="button" style={S.btnPrimary} onClick={submit}>Create Employee</button>
+        <button type="button" style={S.btnPrimary} onClick={submit} disabled={submitting}>{submitting ? "Creating…" : "Create Employee"}</button>
         <button type="button" style={S.btnGhost} onClick={onCancel}>Cancel</button>
         {error && (
           <span style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontFamily: "var(--font-body)", fontSize: "var(--text-12)", color: "var(--color-error)" }}>

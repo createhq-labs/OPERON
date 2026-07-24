@@ -139,7 +139,6 @@ import {
   EMPTY_ROLE_PERMISSIONS,
   getRoleEffectivePermissions as computeRoleEffectivePermissions,
   getRolePermissionIds as computeRolePermissionIds,
-  permissionFromPolicy,
   userMatchesAccessRestrictions,
   deriveAvatar,
   normalizeTocItems,
@@ -219,8 +218,16 @@ function getUserEffectivePermissions(user: User): RolePermissions {
   return role ? getRoleEffectivePermissions(role) : EMPTY_ROLE_PERMISSIONS;
 }
 
+/**
+ * Real capability check — reads the permission names actually resolved
+ * for this user from global.role_permissions/global.permissions (attached
+ * at identity resolution, see src/lib/workforcePermissionLookup.ts), not a
+ * hardcoded per-legacy-role mock bag. Legacy mock users (services/api.ts's
+ * USERS, used when Supabase isn't configured) hand-author permissionIds
+ * directly, so this works unchanged for both real and mock identities.
+ */
 export function hasPermission(user: User, permission: PermissionId): boolean {
-  return permissionFromPolicy(getUserEffectivePermissions(user), permission);
+  return user.permissionIds.includes(permission);
 }
 
 export function isAdmin(user: User): boolean {

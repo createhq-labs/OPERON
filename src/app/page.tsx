@@ -9,16 +9,16 @@ import { getDocumentStorageDiagnostics } from "@/services/documentUpload";
 import { listAssignableRoles, listAssignableDepartments, type AssignmentOption } from "@/lib/workforce/invitations";
 import type {
   DeptId, DocTag, Document, DriveParsedDocument, QuickActionItem, ResourceCategory,
-  Role, RoleId, User, VisibilityScope,
+  Role, RoleId, VisibilityScope,
 } from "@/core/operon";
 import {
   isAdmin, saveRole, canDeleteRole, canEditRole,
-  canManageResources, canManageRoles, canManageUsers, canPublishGlobally,
+  canManageResources, canManageRoles, canPublishGlobally,
   canViewActivity, canViewResources, createDocumentUploadFromFile, createResource,
-  createUser, deleteRole, formatDocumentDate, getAccessibleDocument, getAccessibleDocuments,
-  getActivityFeed, getAllUsers, getCreatableRoles, getDepartmentFilters,
+  deleteRole, getAccessibleDocument, getAccessibleDocuments,
+  getActivityFeed, getAllUsers,
   getPinnedDocuments, getQuickActions, getResourceById, getRoleLabel, getRoles,
-  getSupervisors, getTeams, getUserById, getAssignableDepartments,
+  getTeams, getUserById,
   getDocumentEntity, searchDocuments, searchResources,
   updateDocumentMetadata, replaceDocumentFile,
   canEditDocuments, canDeleteDocuments,
@@ -32,7 +32,6 @@ import { useSession } from "@/auth/useSession";
 import { HomePanel } from "@/features/dashboard/HomePanel";
 import { Sidebar } from "@/components/Sidebar";
 import { NotificationBell } from "@/features/notifications/NotificationBell";
-import { PremiumSelect } from "@/components/PremiumSelect";
 import { DocActionsMenu } from "@/components/DocActionsMenu";
 import { Modal, Button } from "@/components/ui/primitives";
 import { ShellSkeleton } from "@/components/ShellSkeleton";
@@ -52,7 +51,6 @@ const SECTION_NAMES = {
   resources: "Resources",
   activity:  "Activity",
   finance:   "Finance",
-  team:      "Team",
   roles:     "Roles",
   workforce: "Workforce",
   docs:      "Document",
@@ -175,16 +173,6 @@ export default function Page() {
   const [_providerHealth,  setProviderHealth]  = useState(getProviderHealth());
   const [driveConnected, setDriveConnected] = useState(false);
   const [cachedQuickActions, setCachedQuickActions] = useState<Array<{ id: string; label: string; description: string; category?: string }>>([]);
-
-  // ── Team / users ─────────────────────────────────────────────────────────
-  const [newName,            setNewName]            = useState("");
-  const [newEmail,           setNewEmail]           = useState("");
-  const [newRoleId,          setNewRoleId]          = useState<RoleId>("role_intern");
-  const [newDepartmentId,    setNewDepartmentId]    = useState<DeptId>("im");
-  const [newSupervisorId,    setNewSupervisorId]    = useState("");
-  const [assignedDocumentIds,setAssignedDocumentIds]= useState<string[]>([]);
-  const [teamStatus,         setTeamStatus]         = useState("");
-  const [teamError,          setTeamError]          = useState("");
 
   // ── Roles ────────────────────────────────────────────────────────────────
   const [roles,            setRoles]            = useState<Role[]>(getRoles());
@@ -317,35 +305,8 @@ export default function Page() {
   const pinnedDocs     = useMemo(() => (user ? getPinnedDocuments(user, 3) : []),               [user, dataVersion]);
   const accessibleDocs = useMemo(() => (user ? getAccessibleDocuments(user) : []),              [user, dataVersion]);
   const _availableUsers = useMemo(() => (user && isAdmin(user) ? getAllUsers() : []),            [user, dataVersion]);
-  const supervisors    = useMemo(() => (user ? getSupervisors(user) : []),                      [user, dataVersion]);
   const _teams          = useMemo(() => (user ? getTeams() : []),                                [user, dataVersion]);
-  const creatableRoles = useMemo(() => (user ? getCreatableRoles(user) : []),                   [user, dataVersion]);
   const activityFeed   = useMemo(() => (user ? getActivityFeed(user) : []),                     [user, dataVersion]);
-  const assignableDepartments = useMemo(() => (user ? getAssignableDepartments(user, newRoleId) : []), [user, newRoleId, dataVersion]);
-  const creatableRoleOptions = useMemo(
-    () => creatableRoles.map((role) => ({ value: role.id, label: role.name })),
-    [creatableRoles]
-  );
-  const assignableDepartmentOptions = useMemo(
-    () => getDepartmentFilters()
-      .filter((filter) => filter.id !== "all" && assignableDepartments.includes(filter.id as DeptId))
-      .map((filter) => ({ value: filter.id as DeptId, label: filter.label })),
-    [assignableDepartments]
-  );
-  const supervisorOptions = useMemo(
-    () => [
-      { value: "", label: "No supervisor", description: "Assign later from Lifecycle" },
-      ...supervisors.map((supervisor) => ({ value: supervisor.id, label: supervisor.name })),
-    ],
-    [supervisors]
-  );
-
-  useEffect(() => {
-    if (assignableDepartments.length === 0) return;
-    if (!assignableDepartments.includes(newDepartmentId)) {
-      setNewDepartmentId(assignableDepartments[0]);
-    }
-  }, [assignableDepartments, newDepartmentId]);
 
   const libraryDocs = useMemo(() => {
     if (!user) return [];
@@ -369,7 +330,6 @@ export default function Page() {
 
   // ─── Permissions ──────────────────────────────────────────────────────────
   const resourceCanCreate = user ? canManageResources(user) : false;
-  const userCanManage     = user ? canManageUsers(user)     : false;
   const resourceCanView   = user ? canViewResources(user)   : false;
   const activityCanView   = user ? canViewActivity(user)    : false;
   // Gate upload panel against the policy set, not stored permissionIds, so existing
@@ -384,10 +344,9 @@ export default function Page() {
     if (canAccessWorkforce(user)) s.push("workforce");
     if (activityCanView)   s.push("activity");
     if (financeAccess)     s.push("finance");
-    if (userCanManage)     s.push("team");
     if (roleManagerAccess) s.push("roles");
     return s;
-  }, [user, resourceCanView, activityCanView, userCanManage, roleManagerAccess, financeAccess]);
+  }, [user, resourceCanView, activityCanView, roleManagerAccess, financeAccess]);
 
   useEffect(() => {
     const routeSection = new URLSearchParams(window.location.search).get("section") as Section | null;
@@ -414,8 +373,7 @@ export default function Page() {
     void load();
   }, [selectedDocId, user]);
 
-  const localRoleLabel = user ? (user as User & { displayRoleName?: string }).displayRoleName : undefined;
-  const roleLabel = user ? localRoleLabel ?? getRoleLabel(user.roleId) : "";
+  const roleLabel = user ? user.roleName ?? getRoleLabel(user.roleId) : "";
 
   // ─── Handlers ────────────────────────────────────────────────────────────
 
@@ -620,18 +578,6 @@ export default function Page() {
     setResourceAllowedDepartments([]);
     setResourceAllowedTeamIds([]);
     setResourceVisibility("private");
-  }
-
-  function handleCreateUser() {
-    if (!user) return;
-    setTeamError(""); setTeamStatus("");
-    try {
-      createUser({ creator: user, name: newName, email: newEmail, roleId: newRoleId, departmentId: newDepartmentId, supervisorId: newSupervisorId || undefined, assignedDocumentIds, status: "active", dateJoined: formatDocumentDate() });
-      setTeamStatus("User created.");
-      setNewName(""); setNewEmail(""); setAssignedDocumentIds([]);
-    } catch (err) {
-      setTeamError(err instanceof Error ? err.message : "Unable to create user.");
-    }
   }
 
   // ─── Loading screen ───────────────────────────────────────────────────────
@@ -1430,74 +1376,6 @@ export default function Page() {
                   )}
                 </AnimatePresence>
                 <style>{`@media (max-width: 1023px) { .roles-grid { grid-template-columns: minmax(0,1fr) !important; } }`}</style>
-              </motion.div>
-            )}
-
-            {/* Team */}
-            {selectedSection === "team" && (
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}
-                style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 300px", gap: "20px", alignItems: "start" }} className="team-grid"
-              >
-                <div style={{ ...S.card, padding: "24px" }}>
-                  <h2 style={S.sectionTitle}>Team directory</h2>
-                  <p style={S.sectionDesc}>Manage user access and role assignments.</p>
-                  {userCanManage ? (
-                    <div style={{ marginTop: "20px", display: "flex", flexDirection: "column", gap: "8px" }}>
-                      {getAllUsers().map((member) => (
-                        <div key={member.id} style={{ ...S.cardInner, padding: "14px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
-                          <div>
-                            <div style={{ fontFamily: "var(--font-ui)", fontSize: "var(--text-14)", fontWeight: 600, color: "var(--op-text)" }}>{member.name}</div>
-                            <div style={{ fontFamily: "var(--font-body)", fontSize: "var(--text-12)", color: "var(--op-text-3)", marginTop: "2px" }}>{member.email}</div>
-                          </div>
-                          <span style={S.badge}>{getRoleLabel(member.roleId)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : <div style={{ marginTop: "20px", ...S.emptyState }}>Team management is unavailable for your role.</div>}
-                </div>
-
-                {userCanManage && (
-                  <aside style={{ ...S.card, padding: "20px", display: "flex", flexDirection: "column", gap: "14px" }}>
-                    <h3 style={{ fontFamily: "var(--font-ui)", fontSize: "var(--text-16)", fontWeight: 600, color: "var(--op-text)", margin: 0 }}>Create user</h3>
-                    <input value={newName}  onChange={(e) => setNewName(e.target.value)}  placeholder="Full name" style={S.input} />
-                    <input value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="Email"     style={S.input} />
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-                      <PremiumSelect<RoleId>
-                        label="Role"
-                        value={newRoleId}
-                        options={creatableRoleOptions}
-                        disabled={creatableRoleOptions.length === 0}
-                        onChange={setNewRoleId}
-                      />
-                      <PremiumSelect<DeptId>
-                        label="Department"
-                        value={newDepartmentId}
-                        options={assignableDepartmentOptions}
-                        disabled={assignableDepartmentOptions.length === 0}
-                        onChange={setNewDepartmentId}
-                      />
-                    </div>
-                    {supervisors.length > 0 ? (
-                      <PremiumSelect<string>
-                        label="Supervisor (optional)"
-                        value={newSupervisorId}
-                        options={supervisorOptions}
-                        onChange={setNewSupervisorId}
-                      />
-                    ) : (
-                      <div style={{ fontFamily: "var(--font-body)", fontSize: "var(--text-12)", color: "var(--op-text-3)", lineHeight: 1.5 }}>
-                        Supervisor can be assigned later from Lifecycle.
-                      </div>
-                    )}
-                    <button type="button" onClick={handleCreateUser}
-                      disabled={!newName.trim() || !newEmail.trim() || assignableDepartments.length === 0 || creatableRoles.length === 0}
-                      style={{ ...S.btnPrimary, width: "100%", height: "38px", justifyContent: "center", opacity: (!newName.trim() || !newEmail.trim() || assignableDepartments.length === 0 || creatableRoles.length === 0) ? 0.4 : 1, cursor: (!newName.trim() || !newEmail.trim() || assignableDepartments.length === 0 || creatableRoles.length === 0) ? "not-allowed" : "pointer" }}
-                    >Create user</button>
-                    {teamStatus && <p style={{ fontFamily: "var(--font-body)", fontSize: "var(--text-12)", color: "var(--op-text-3)", margin: 0 }}>{teamStatus}</p>}
-                    {teamError  && <p style={{ fontFamily: "var(--font-body)", fontSize: "var(--text-12)", color: "var(--color-error)", margin: 0 }}>{teamError}</p>}
-                  </aside>
-                )}
-                <style>{`@media (max-width: 1023px) { .team-grid { grid-template-columns: minmax(0,1fr) !important; } }`}</style>
               </motion.div>
             )}
 

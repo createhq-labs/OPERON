@@ -1,7 +1,6 @@
 import { supabase } from "@/lib/supabase";
 
 export const workforceDb = supabase.schema("workforce");
-export const globalDb = supabase.schema("global");
 
 export class WorkforceDataError extends Error {
   constructor(operation: string, cause: unknown) {

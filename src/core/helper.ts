@@ -119,61 +119,21 @@ export function getRolePermissionIds(permissions: RolePermissions): PermissionId
   if (permissions.features?.viewCreatorOps)                    ids.push("view_creator_ops");
   if (permissions.features?.viewBrand)                         ids.push("view_brand");
   if (permissions.features?.viewOperations)                    ids.push("view_operations");
-  if (permissions.features?.approveLeaveTl)                    ids.push("approve_leave_tl");
+  if (permissions.features?.approveLeaveTl)                    ids.push("approve_leave_team_lead");
   if (permissions.features?.approveLeaveHr)                    ids.push("approve_leave_hr");
   if (permissions.features?.manageHrCalendar)                  ids.push("manage_hr_calendar");
-  if (permissions.features?.viewHrRecordsAll)                  ids.push("view_hr_records_all");
+  if (permissions.features?.viewHrRecordsAll)                  ids.push("view_all_hr_records");
   if (permissions.features?.submitProbationReview)             ids.push("submit_probation_review");
   if (permissions.features?.decideProbationReview)             ids.push("decide_probation_review");
   if (permissions.features?.acknowledgeDeboarding)              ids.push("acknowledge_deboarding");
-  if (permissions.features?.approveDeboardingEmployeeTrack)    ids.push("approve_deboarding_employee_track");
-  if (permissions.features?.flagDeboardingAny)                 ids.push("flag_deboarding_any");
+  if (permissions.features?.approveDeboardingEmployeeTrack)    ids.push("approve_employee_track_deboarding");
+  if (permissions.features?.flagDeboardingAny)                 ids.push("flag_deboarding");
   if (permissions.features?.viewTeamLeaveHistory)              ids.push("view_team_leave_history");
   if (permissions.features?.managePeople)                      ids.push("manage_people");
   if (permissions.features?.manageOnboarding)                  ids.push("manage_onboarding");
 
   // Deduplicate while preserving order
   return [...new Set(ids)];
-}
-
-/**
- * Tests a single PermissionId against a resolved RolePermissions object.
- * This is the inner check; most callers should use hasPermission(user, id).
- */
-export function permissionFromPolicy(permissions: RolePermissions, permission: PermissionId): boolean {
-  switch (permission) {
-    case "view_library":
-    case "view_documents":        return permissions.documents.view;
-    case "add_documents":         return permissions.documents.create || permissions.documents.upload;
-    case "edit_documents":        return permissions.documents.edit;
-    case "delete_documents":      return permissions.documents.delete;
-    case "manage_team_documents": return permissions.documents.edit;
-    case "manage_users":          return permissions.users.create || permissions.users.edit || permissions.users.delete;
-    case "manage_roles":          return permissions.system.roleManagement;
-    case "manage_uploads":        return permissions.documents.upload;
-    case "send_to_all":           return permissions.features?.sendToAll       ?? false;
-    case "view_activity":         return permissions.features?.viewActivity    ?? false;
-    case "manage_resources":      return permissions.features?.manageResources ?? false;
-    case "view_resources":        return permissions.features?.viewResources   ?? false;
-    case "view_hr":               return permissions.features?.viewHr          ?? false;
-    case "view_onboarding":       return permissions.features?.viewOnboarding  ?? false;
-    case "view_creator_ops":      return permissions.features?.viewCreatorOps  ?? false;
-    case "view_brand":            return permissions.features?.viewBrand       ?? false;
-    case "view_operations":       return permissions.features?.viewOperations  ?? false;
-    case "approve_leave_tl":                 return permissions.features?.approveLeaveTl                 ?? false;
-    case "approve_leave_hr":                 return permissions.features?.approveLeaveHr                 ?? false;
-    case "manage_hr_calendar":               return permissions.features?.manageHrCalendar               ?? false;
-    case "view_hr_records_all":              return permissions.features?.viewHrRecordsAll               ?? false;
-    case "submit_probation_review":          return permissions.features?.submitProbationReview          ?? false;
-    case "decide_probation_review":          return permissions.features?.decideProbationReview          ?? false;
-    case "acknowledge_deboarding":           return permissions.features?.acknowledgeDeboarding          ?? false;
-    case "approve_deboarding_employee_track": return permissions.features?.approveDeboardingEmployeeTrack ?? false;
-    case "flag_deboarding_any":              return permissions.features?.flagDeboardingAny              ?? false;
-    case "view_team_leave_history":          return permissions.features?.viewTeamLeaveHistory           ?? false;
-    case "manage_people":                    return permissions.features?.managePeople                   ?? false;
-    case "manage_onboarding":                return permissions.features?.manageOnboarding               ?? false;
-    default:                      return false;
-  }
 }
 
 // ─── Access Restriction Checks ───────────────────────────────────────────────

@@ -2,7 +2,8 @@ import "server-only";
 import type { NextRequest } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { appRoleFromGlobalRole } from "@/auth/authAdapter";
-import type { User } from "@/core/types";
+import { fetchRolePermissionNames } from "@/lib/workforcePermissionLookup";
+import type { PermissionId, User } from "@/core/types";
 
 /**
  * Resolves the authenticated Workforce identity for a request, verifying
@@ -35,6 +36,10 @@ export async function resolveRequestUser(request: NextRequest): Promise<User | n
 
   const roleField = row.role as { name?: string } | { name?: string }[] | null;
   const roleName = (Array.isArray(roleField) ? roleField[0]?.name : roleField?.name) ?? "";
+  const roleId = row.role_id as string | null;
+  const permissionIds = roleId
+    ? await fetchRolePermissionNames(supabaseAdmin.schema("global"), roleId)
+    : [];
 
   return {
     id: row.id as string,
@@ -49,7 +54,7 @@ export async function resolveRequestUser(request: NextRequest): Promise<User | n
     teamId: (row.department_id as string | null) ?? undefined,
     designationId: (row.designation_id as string | null) ?? undefined,
     supervisorId: (row.manager_user_id as string | null) ?? undefined,
-    permissionIds: [],
+    permissionIds: permissionIds as PermissionId[],
     createdById: "",
     status: "active",
   };
