@@ -6,10 +6,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import type { User } from "@/core/types";
 import {
   canManageRoles,
-  canManageUsers,
   canPublishGlobally,
   canViewActivity,
-  canViewResources,
   getRoleLabel,
 } from "@/core/operon";
 import { useSession } from "@/auth/useSession";
@@ -24,7 +22,6 @@ type DashboardSection =
   | "resources"
   | "activity"
   | "finance"
-  | "team"
   | "roles";
 
 interface DashboardRouteShellProps {
@@ -50,18 +47,21 @@ export function DashboardRouteShell({
   const { signOut } = useSession();
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
 
+  // Order must exactly match src/app/page.tsx's own visibleSections
+  // construction — this is a second, independent nav-rendering shell
+  // (only used by the Workforce module) and having its section order
+  // drift from the home dashboard's is what caused Workforce/Resources
+  // to visually swap places depending on which shell was active.
   const visibleSections = useMemo(() => {
-    const sections: DashboardSection[] = ["home", "library", "workforce"];
-    if (canViewResources(user)) sections.push("resources");
+    const sections: DashboardSection[] = ["home", "library", "resources"];
+    sections.push("workforce");
     if (canViewActivity(user)) sections.push("activity");
     if (canPublishGlobally(user)) sections.push("finance");
-    if (canManageUsers(user)) sections.push("team");
     if (canManageRoles(user)) sections.push("roles");
     return sections;
   }, [user]);
 
-  const localRoleLabel = (user as User & { displayRoleName?: string }).displayRoleName;
-  const roleLabel = localRoleLabel ?? getRoleLabel(user.roleId);
+  const roleLabel = user.roleName ?? getRoleLabel(user.roleId);
 
   function handleSectionSelect(section: string) {
     router.push(sectionHref(section as DashboardSection));

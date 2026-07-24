@@ -1,5 +1,5 @@
 import { supabase } from "@/lib/supabase";
-import type { DeptId, RoleId, UserStatus } from "@/core/types";
+import type { DeptId, RoleId, UserStatus, UserType } from "@/core/types";
 
 async function authHeaders(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();
@@ -11,6 +11,7 @@ export interface WorkforceEmployee {
   id: string;
   name: string;
   email: string;
+  userType: UserType;
   roleId: RoleId;
   roleName?: string;
   departmentId?: DeptId;
@@ -38,6 +39,13 @@ export interface CreateWorkforceEmployeeInput {
   managerUserId?: string;
   joinedAt: string;
   temporaryPassword: string;
+  probationRequired?: boolean;
+  probationDurationDays?: number;
+}
+
+export interface CreateWorkforceEmployeeResult extends WorkforceEmployee {
+  /** Set when the core identity was created but a supplementary record (employment details/onboarding) failed to save. */
+  warning?: string;
 }
 
 async function getJson(url: string) {
@@ -68,7 +76,7 @@ export async function getWorkforceDirectoryOptions(): Promise<WorkforceDirectory
 }
 
 /** Creates a real auth.users + global.users record — the person can log in immediately with the temporary password. */
-export async function createWorkforceEmployee(input: CreateWorkforceEmployeeInput): Promise<WorkforceEmployee> {
+export async function createWorkforceEmployee(input: CreateWorkforceEmployeeInput): Promise<CreateWorkforceEmployeeResult> {
   const headers = await authHeaders();
   const response = await fetch("/api/workforce/employees", {
     method: "POST",
@@ -79,7 +87,7 @@ export async function createWorkforceEmployee(input: CreateWorkforceEmployeeInpu
   if (!response.ok || !payload?.success) {
     throw new Error(payload?.error || "Failed to create the employee.");
   }
-  return payload.employee as WorkforceEmployee;
+  return { ...(payload.employee as WorkforceEmployee), warning: payload.warning as string | undefined };
 }
 
 /** Client-side, no backend call — used for the "Generate" button on the temporary password field. */

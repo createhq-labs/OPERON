@@ -1,42 +1,30 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { LucideIcon } from "lucide-react";
 import {
   Building2, UserCheck, CalendarDays, TrendingUp, Flame, Trophy,
   ClipboardList, History, Activity as ActivityIcon, Sparkles,
-  ArrowUpRight, X, Inbox, ChevronDown,
+  ArrowUpRight, X, Inbox, ChevronDown, LogOut,
 } from "lucide-react";
 import type {
   User,
   AttendanceDayStatus,
   AttendanceRecord,
   LeaveRequest,
-  LeaveRequestType,
-  LeaveStatus,
   ProbationRecord,
-  ActivityEvent,
-  ActivityAction,
+  ProbationStatus,
 } from "@/core/operon";
 import {
-  getAttendanceHistoryForUser,
-  getLeaveHistoryForUser,
-  getHolidays,
-  getProbationHistoryForUser,
-  getManagerHistoryForUser,
-  getActivityForEmployee,
   computeAttendanceSummary,
-  getUserById,
   getRoleLabel,
   getDepartmentLabel,
   getTeams,
   formatRelativeTime,
   daysUntil,
-  setAttendanceDay,
-  submitLeaveRequest,
 } from "@/core/operon";
-import { LEAVE_TYPE_LABELS, PROBATION_ACTIVE_STATUSES } from "@/core/types";
+import { PROBATION_ACTIVE_STATUSES } from "@/core/types";
 import { canViewAllHrRecords } from "@/security/permissions";
 import { resolveDateRange, DATE_RANGE_PRESET_LABELS, type DateRangePreset } from "@/core/dateRanges";
 import { MonthlyCalendar, addMonths, monthLabel, type RequestKind } from "@/app/workforce/attendance/page";
@@ -45,6 +33,9 @@ import { ProbationTimeline, ProbationReviewBanner } from "@/features/workforce/P
 import { S, T } from "@/styles/sharedUi";
 import { motionPreset } from "@/styles/motionPresets";
 import { STATUS_TOKENS } from "@/styles/statusColors";
+import { getWorkforceEmployeeProfile, type WorkforceEmployeeProfile as WorkforceEmployeeProfileState, type WorkforceProfileActivityEntry, type WorkforceProfileHoliday, type WorkforceProfileLeaveRequest, type WorkforceProfileProbationRecord } from "@/services/workforceEmployeeProfile";
+import { setWorkforceAttendanceDay } from "@/services/workforceAttendance";
+import { submitWorkforceLeaveRequest } from "@/services/workforceLeave";
 
 // Mirrors attendance/page.tsx's RECENT_PAST_DAYS — how far back a non-HR
 // employee may still correct their own attendance.
@@ -53,26 +44,85 @@ const EDIT_WINDOW_DAYS = 7;
 const PRESETS: DateRangePreset[] = ["from_joining", "this_week", "this_month", "last_month", "quarter", "year", "custom"];
 const EMPTY_REQUEST_MAP = new Map<string, LeaveRequest>();
 
-const LEAVE_STATUS_META: Record<LeaveStatus, { label: string; fg: string }> = {
-  pending:            { label: "Pending manager approval", fg: "#94a3b8" },
-  tl_approved:        { label: "Pending HR approval",       fg: "#60a5fa" },
-  cofounder_pending:  { label: "Pending Co-Founder approval", fg: "#fbbf24" },
-  hr_approved:        { label: "Approved",                  fg: "#4ade80" },
-  rejected:           { label: "Rejected",                  fg: "#e5484d" },
-  cancelled:          { label: "Cancelled",                 fg: "#94a3b8" },
+// Real workforce.hr_leave_requests vocabulary — distinct from core/types.ts's
+// legacy 5-value LeaveStatus used elsewhere in the (still-mock) app.
+const LEAVE_STATUS_META: Record<string, { label: string; fg: string }> = {
+  draft:             { label: "Draft",                      fg: "#94a3b8" },
+  pending_manager:   { label: "Pending manager approval",    fg: "#94a3b8" },
+  manager_approved:  { label: "Pending HR approval",         fg: "#60a5fa" },
+  pending_hr:        { label: "Pending HR approval",         fg: "#60a5fa" },
+  approved:          { label: "Approved",                    fg: "#4ade80" },
+  rejected:          { label: "Rejected",                    fg: "#e5484d" },
+  cancelled:         { label: "Cancelled",                   fg: "#94a3b8" },
 };
 
-const ACTIVITY_META: Partial<Record<ActivityAction, { icon: LucideIcon; describe: (e: ActivityEvent) => string }>> = {
-  USER_MANAGED:          { icon: UserCheck,     describe: () => "Roster details updated" },
-  DATE_JOINED_CHANGED:   { icon: CalendarDays,  describe: (e) => `Date joined changed from ${e.metadata?.oldDate || "—"} to ${e.metadata?.newDate || "—"}` },
-  PROBATION_SUBMITTED:   { icon: ClipboardList, describe: () => "Probation review submitted" },
-  PROBATION_UNDER_REVIEW:{ icon: ClipboardList, describe: () => "Probation moved to under review" },
-  PROBATION_DECIDED:     { icon: ClipboardList, describe: (e) => `Probation ${e.metadata?.outcome || "decided"}` },
-  PROBATION_NOTE_ADDED:  { icon: ClipboardList, describe: () => "Probation note added" },
-  ATTENDANCE_UPDATED:    { icon: CalendarDays,  describe: () => "Attendance record updated" },
-  DEBOARDING_FLAGGED:    { icon: History,       describe: () => "Deboarding initiated" },
-  DEBOARDING_COMPLETED:  { icon: History,       describe: () => "Offboarding completed" },
+const EMPTY_PROFILE: WorkforceEmployeeProfileState = {
+  supervisorName: undefined,
+  attendance: [],
+  holidays: [],
+  leaveRequests: [],
+  probationRecords: [],
+  activity: [],
 };
+
+const ACTIVITY_ICON: Record<WorkforceProfileActivityEntry["kind"], LucideIcon> = {
+  joining_date: CalendarDays,
+  onboarding:   UserCheck,
+  probation:    ClipboardList,
+  leave:        ClipboardList,
+  deboarding:   LogOut,
+  attendance:   CalendarDays,
+};
+
+// ─── Adapters: real workforce.* rows → the legacy shapes MonthlyCalendar,
+// computeAttendanceSummary, ProbationTimeline/ProbationReviewBanner, and
+// StatusPill already render — same strategy as attendance/page.tsx's adapters.
+
+function toLegacyAttendanceRecords(days: { date: string; status: string }[]): AttendanceRecord[] {
+  const byMonth = new Map<string, Record<string, AttendanceDayStatus>>();
+  for (const d of days) {
+    const month = d.date.slice(0, 7);
+    const day = String(Number(d.date.slice(8, 10)));
+    if (!byMonth.has(month)) byMonth.set(month, {});
+    if (d.status !== "unmarked") byMonth.get(month)![day] = d.status as AttendanceDayStatus;
+  }
+  return Array.from(byMonth.entries()).map(([month, dayMap]) => ({
+    id: month, userId: "", month, days: dayMap, createdAt: "", updatedAt: "",
+  }));
+}
+
+function toLegacyHoliday(h: WorkforceProfileHoliday) {
+  return { id: h.id, date: h.date, name: h.name, type: "public" as const, createdById: "", createdAt: "", updatedAt: "" };
+}
+
+function toLegacyProbationStatus(status: string): ProbationStatus {
+  switch (status) {
+    case "review_due":
+    case "recommendation_submitted": return "under_review";
+    case "extended": return "extended";
+    case "confirmed": return "confirmed";
+    case "terminated":
+    case "cancelled": return "terminated";
+    default: return "pending";
+  }
+}
+
+function toLegacyProbationRecord(r: WorkforceProfileProbationRecord): ProbationRecord {
+  return {
+    id: r.id,
+    userId: "",
+    dateJoined: r.startDate,
+    probationDurationDays: r.durationDays,
+    probationDurationUnit: "days",
+    expectedReviewDate: r.reviewDate,
+    status: toLegacyProbationStatus(r.status),
+    reviewedById: undefined,
+    reviewedAt: r.decidedAt ?? undefined,
+    parentRecordId: undefined,
+    submittedById: "",
+    createdAt: "",
+  };
+}
 
 function SectionHeader({ icon: Icon, title }: { icon: LucideIcon; title: string }) {
   return (
@@ -128,30 +178,24 @@ export function EmployeeProfilePanel({
 
   const range = resolveDateRange(preset, person.dateJoined, today, preset === "custom" ? { from: customFrom, to: customTo } : undefined);
 
-  const { attendanceRecords, leaveHistory, activity, loadError } = useMemo(() => {
-    try {
-      return {
-        attendanceRecords: getAttendanceHistoryForUser(actor, person.id, range.from, range.to),
-        leaveHistory:      getLeaveHistoryForUser(actor, person.id),
-        activity:          getActivityForEmployee(actor, person.id),
-        loadError:         "",
-      };
-    } catch (err) {
-      return {
-        attendanceRecords: [] as AttendanceRecord[],
-        leaveHistory:      [] as LeaveRequest[],
-        activity:          [] as ActivityEvent[],
-        loadError:         err instanceof Error ? err.message : "Unable to load this employee's records.",
-      };
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [actor.id, person.id, range.from, range.to, editVersion]);
+  const [profile, setProfile] = useState<WorkforceEmployeeProfileState>(EMPTY_PROFILE);
+  const [loadError, setLoadError] = useState("");
 
-  const holidays = getHolidays();
+  useEffect(() => {
+    let cancelled = false;
+    getWorkforceEmployeeProfile(person.id, range.from, range.to)
+      .then((data) => { if (!cancelled) { setProfile(data); setLoadError(""); } })
+      .catch((err) => { if (!cancelled) setLoadError(err instanceof Error ? err.message : "Unable to load this employee's records."); });
+    return () => { cancelled = true; };
+  }, [person.id, range.from, range.to, editVersion]);
+
+  const attendanceRecords = useMemo(() => toLegacyAttendanceRecords(profile.attendance), [profile.attendance]);
+  const leaveHistory = profile.leaveRequests;
+  const holidays = useMemo(() => profile.holidays.map(toLegacyHoliday), [profile.holidays]);
   const summary = computeAttendanceSummary(attendanceRecords, holidays, range.from, range.to);
-  const probationHistory = getProbationHistoryForUser(person.id);
+  const probationHistory = useMemo(() => profile.probationRecords.map(toLegacyProbationRecord), [profile.probationRecords]);
   const latestProbation: ProbationRecord | undefined = probationHistory[probationHistory.length - 1];
-  const managerHistory = getManagerHistoryForUser(person.id);
+  const activity = profile.activity;
   const team = person.teamId ? getTeams().find((t) => t.id === person.teamId) : undefined;
 
   // Named holidays are listed individually; Sundays are counted rather than
@@ -177,7 +221,7 @@ export function EmployeeProfilePanel({
   const holidaysByDate = useMemo(() => new Map(holidays.map((h) => [h.date, h])), [holidays]);
 
   const registerRows = useMemo(() => {
-    const rows: Array<{ iso: string; status: AttendanceDayStatus; leave?: LeaveRequest }> = [];
+    const rows: Array<{ iso: string; status: AttendanceDayStatus; leave?: WorkforceProfileLeaveRequest }> = [];
     for (const record of attendanceRecords) {
       for (const [day, status] of Object.entries(record.days)) {
         const iso = `${record.month}-${day.padStart(2, "0")}`;
@@ -205,11 +249,12 @@ export function EmployeeProfilePanel({
     return diffDays >= 0 && diffDays <= EDIT_WINDOW_DAYS;
   }
 
-  function handleEditSelectStatus(targetUser: User, day: number, status: AttendanceDayStatus | null) {
+  async function handleEditSelectStatus(targetUser: User, day: number, status: AttendanceDayStatus | null) {
     const iso = `${calendarMonth}-${String(day).padStart(2, "0")}`;
     if (!canEditDateLocal(iso)) { setEditMessage("That day is outside the editable window."); return; }
+    if (status === "half_day" || status === "absent") { setEditMessage("That status isn't tracked in the real attendance system."); return; }
     try {
-      setAttendanceDay(actor, targetUser.id, iso, status);
+      await setWorkforceAttendanceDay(targetUser.id, iso, status ?? "unmarked");
       setEditMessage(status ? `${STATUS_TOKENS[status].label} saved for ${iso}.` : `Cleared ${iso}.`);
       setEditSelectedDay(null);
       setEditVersion((v) => v + 1);
@@ -227,12 +272,12 @@ export function EmployeeProfilePanel({
     setEditRequestReason("");
   }
 
-  function handleEditSubmitRequest() {
+  async function handleEditSubmitRequest() {
     if (!editRequestDay) return;
     const from = `${calendarMonth}-${String(editRequestDay).padStart(2, "0")}`;
     if (!editRequestTo || !editRequestReason.trim()) { setEditMessage("Date range and reason are required."); return; }
     try {
-      submitLeaveRequest(actor, { requestType: editRequestKind as LeaveRequestType, dateFrom: from, dateTo: editRequestTo, reason: editRequestReason.trim() });
+      await submitWorkforceLeaveRequest(editRequestKind, from, editRequestTo, editRequestReason.trim());
       setEditMessage(`${editRequestKind === "wfh" ? "WFH" : "Leave"} request submitted.`);
       setEditRequestDay(null);
       setEditSelectedDay(null);
@@ -269,9 +314,9 @@ export function EmployeeProfilePanel({
               <StatusPill status={person.status} />
             </div>
             <div style={{ ...T.cardDesc, marginTop: "4px" }}>
-              {getRoleLabel(person.roleId)} · {person.departmentId ? getDepartmentLabel(person.departmentId) : "No department"}
+              {person.roleName ?? getRoleLabel(person.roleId)} · {person.departmentName ?? (person.departmentId ? getDepartmentLabel(person.departmentId) : "No department")}
               {team ? ` · ${team.name}` : ""}
-              {person.supervisorId ? ` · Reports to ${getUserById(person.supervisorId)?.name ?? "—"}` : ""}
+              {person.supervisorId ? ` · Reports to ${profile.supervisorName ?? "—"}` : ""}
             </div>
             <div style={{ display: "flex", gap: "6px", marginTop: "8px", flexWrap: "wrap" }}>
               <span style={S.badgeAccent}>{summary.attendancePercentage}% attendance</span>
@@ -300,8 +345,8 @@ export function EmployeeProfilePanel({
             <SectionHeader icon={Building2} title="Employment" />
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "12px" }}>
               <InfoField label="Date Joined" value={person.dateJoined ?? "Unknown"} />
-              <InfoField label="Department" value={person.departmentId ? getDepartmentLabel(person.departmentId) : "—"} />
-              <InfoField label="Manager" value={person.supervisorId ? getUserById(person.supervisorId)?.name ?? "—" : "No manager"} />
+              <InfoField label="Department" value={person.departmentName ?? (person.departmentId ? getDepartmentLabel(person.departmentId) : "—")} />
+              <InfoField label="Manager" value={person.supervisorId ? profile.supervisorName ?? "—" : "No manager"} />
               <InfoField label="Employment Status" value={<StatusPill status={person.status} />} />
             </div>
           </div>
@@ -409,8 +454,6 @@ export function EmployeeProfilePanel({
                 {registerRows.map((row) => {
                   const tok = STATUS_TOKENS[row.status];
                   const Icon = tok.icon;
-                  const approvedById = row.leave?.hrApprovedById ?? row.leave?.tlApprovedById;
-                  const approvedAt   = row.leave?.hrApprovedAt ?? row.leave?.tlApprovedAt;
                   return (
                     <motion.div
                       key={row.iso}
@@ -426,9 +469,9 @@ export function EmployeeProfilePanel({
                       <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", ...T.bodySmall, color: tok.fg }}>
                         <Icon size={12} /> {tok.label}
                       </span>
-                      <span style={T.bodySmall}>{row.leave ? `${LEAVE_TYPE_LABELS[row.leave.requestType] ?? row.leave.requestType}: ${row.leave.reason}` : "—"}</span>
-                      <span style={T.bodySmall}>{approvedById ? getUserById(approvedById)?.name ?? approvedById : "—"}</span>
-                      <span style={T.bodySmall}>{approvedAt ?? "—"}</span>
+                      <span style={T.bodySmall}>{row.leave ? `${row.leave.requestType === "wfh" ? "WFH" : "Leave"}: ${row.leave.reason}` : "—"}</span>
+                      <span style={T.bodySmall}>{row.leave?.decidedByName ?? "—"}</span>
+                      <span style={T.bodySmall}>{row.leave?.decidedAt ?? "—"}</span>
                       <span style={T.bodySmall}>—</span>
                     </motion.div>
                   );
@@ -446,18 +489,16 @@ export function EmployeeProfilePanel({
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                 {leaveHistory.map((req) => {
-                  const meta = LEAVE_STATUS_META[req.status];
-                  const decidedById = req.hrApprovedById ?? req.tlApprovedById;
-                  const decidedAt   = req.hrApprovedAt ?? req.tlApprovedAt;
+                  const meta = LEAVE_STATUS_META[req.status] ?? { label: req.status, fg: "var(--op-text-3)" };
                   return (
                     <div key={req.id} className="op-row-interactive" style={{ ...S.cardInner, border: "1px solid var(--op-border)", padding: "10px 14px", display: "flex", flexDirection: "column", gap: "4px" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}>
-                        <span style={T.bodySmall}>{LEAVE_TYPE_LABELS[req.requestType] ?? req.requestType}: {req.dateFrom} → {req.dateTo}</span>
+                        <span style={T.bodySmall}>{req.requestType === "wfh" ? "WFH" : "Leave"}: {req.dateFrom} → {req.dateTo}</span>
                         <span style={{ ...T.bodySmall, color: meta.fg }}>{meta.label}</span>
                       </div>
                       <div style={{ ...T.caption, opacity: 0.7 }}>
                         Requested {req.createdAt} · {req.reason}
-                        {decidedById && ` · Decided by ${getUserById(decidedById)?.name ?? decidedById}${decidedAt ? ` on ${decidedAt}` : ""}`}
+                        {req.decidedByName && ` · Decided by ${req.decidedByName}${req.decidedAt ? ` on ${req.decidedAt}` : ""}`}
                         {req.rejectionReason && ` · Rejected: ${req.rejectionReason}`}
                       </div>
                     </div>
@@ -521,26 +562,6 @@ export function EmployeeProfilePanel({
           </div>
 
           {/* Manager History */}
-          <div>
-            <SectionHeader icon={UserCheck} title="Manager History" />
-            {managerHistory.length === 0 ? (
-              <EmptyBlock icon={UserCheck} title="No manager changes" desc="Reporting-manager changes will be tracked here." />
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                {managerHistory.map((entry, i) => {
-                  const next = managerHistory[i + 1];
-                  const manager = entry.supervisorId ? getUserById(entry.supervisorId) : undefined;
-                  return (
-                    <div key={entry.id} style={{ ...T.bodySmall, display: "flex", gap: "10px" }}>
-                      <span>{manager?.name ?? "No manager"}</span>
-                      <span style={{ opacity: 0.6 }}>{entry.effectiveFrom} → {next ? next.effectiveFrom : "Present"}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
           {/* Activity Timeline */}
           <div>
             <SectionHeader icon={ActivityIcon} title="Activity Timeline" />
@@ -549,17 +570,15 @@ export function EmployeeProfilePanel({
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                 {activity.map((event) => {
-                  const meta = ACTIVITY_META[event.action];
-                  const Icon = meta?.icon ?? History;
-                  const actorName = getUserById(event.userId)?.name ?? "Someone";
+                  const Icon = ACTIVITY_ICON[event.kind] ?? History;
                   return (
                     <div key={event.id} style={{ display: "flex", gap: "10px", alignItems: "flex-start", padding: "8px 4px" }}>
                       <div style={{ width: "22px", height: "22px", borderRadius: "50%", background: "var(--op-surface-3)", border: "1px solid var(--op-border)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: "1px" }}>
                         <Icon size={11} color="var(--op-text-3)" />
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={T.bodySmall}>{meta ? meta.describe(event) : event.action}</div>
-                        <div style={T.caption}>{actorName} · {formatRelativeTime(event.timestamp)}</div>
+                        <div style={T.bodySmall}>{event.label}</div>
+                        <div style={T.caption}>{event.actorName} · {formatRelativeTime(event.timestamp)}</div>
                       </div>
                     </div>
                   );

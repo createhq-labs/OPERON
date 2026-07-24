@@ -1,31 +1,24 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import type { LucideIcon } from "lucide-react";
 import { UserPlus2, UserRound, Briefcase, Users, ShieldCheck, CircleAlert } from "lucide-react";
 import type { DeboardingRecord, DeptId, OnboardingRecord, User, UserStatus } from "@/core/operon";
 import { useSession } from "@/auth/useSession";
 import {
   acknowledgeOnboarding,
-  approveCreatorDeboarding,
-  completeCreatorDeboarding,
   completeOnboarding,
   getDeboardingRecords,
   getDepartments,
-  getMyDirectReports,
   getOnboardingRecords,
   getUserById,
   getUsers,
   rejectOnboarding,
-  submitCreatorDeboarding,
-  updateRosterMemberDetails,
 } from "@/core/operon";
 import {
-  canApproveCreatorDeboarding,
   canManageOnboarding,
   canManagePeople,
-  canSubmitCreatorDeboarding,
   canViewAllHrRecords,
 } from "@/security/permissions";
 import { StatusPill } from "@/features/workforce/StatusPill";
@@ -77,15 +70,8 @@ export default function PeoplePage() {
   const [employeesVersion, setEmployeesVersion] = useState(0);
 
   const isHrTier = user ? canViewAllHrRecords(user) : false;
-  const canSubmitCreator = user ? canSubmitCreatorDeboarding(user) : false;
-  const canApproveDeboard = user ? canApproveCreatorDeboarding(user) : false;
   const canEditPeople = user ? canManagePeople(user) : false;
   const canRunOnboarding = user ? canManageOnboarding(user) : false;
-
-  const directReportIds = useMemo(
-    () => new Set(user ? getMyDirectReports(user).map((u) => u.id) : []),
-    [user],
-  );
 
   const deboardingByUserId = useMemo(() => {
     if (!user) return new Map<string, DeboardingRecord>();
@@ -116,17 +102,17 @@ export default function PeoplePage() {
   const departments = getDepartments();
   const managerOptions = allUsers.filter((u) => u.status !== "disabled" && u.userType === "employee");
 
-  // Employees tab is sourced from the real global.users roster (see
-  // src/services/workforceEmployees.ts) — the backend already scopes rows
-  // to direct reports for a non-HR-tier caller, so no client-side filtering
-  // by directReportIds is needed here (unlike the Creators tab below, which
-  // still runs on the legacy in-memory engine).
-  const employees: User[] = realEmployees.map((e) => ({
+  // Employees and Creators tabs are both sourced from the real global.users
+  // roster (see src/services/workforceEmployees.ts) — the backend already
+  // scopes rows to direct reports (or the full roster for HR tier / creator-
+  // deboarding approvers), so no client-side direct-report filtering is
+  // needed here.
+  const displayPeople: User[] = realEmployees.map((e) => ({
     id: e.id,
     name: e.name,
     email: e.email,
     avatar: "",
-    userType: "employee",
+    userType: e.userType,
     roleId: e.roleId,
     roleName: e.roleName,
     departmentId: e.departmentId,
@@ -140,8 +126,8 @@ export default function PeoplePage() {
     dateJoined: e.dateJoined,
   }));
 
-  const creatorPool = allUsers.filter((u) => u.userType === "creator");
-  const creators = (canApproveDeboard || isHrTier) ? creatorPool : creatorPool.filter((u) => directReportIds.has(u.id));
+  const employees = displayPeople.filter((p) => p.userType === "employee");
+  const creators = displayPeople.filter((p) => p.userType === "creator");
 
   const onboardingRecords = canRunOnboarding || isHrTier ? getOnboardingRecords(user) : [];
   const q = search.trim().toLowerCase();
@@ -250,34 +236,26 @@ export default function PeoplePage() {
         <PeopleList
           actor={user}
           people={filteredCreators}
-          emptyMessage="No creators found."
+          emptyMessage={employeesError || "No creators found."}
           deboardingByUserId={deboardingByUserId}
           renderColumns={(person) => (
-            <InfoCell label="Manager" value={person.supervisorId ? (getUserById(person.supervisorId)?.name ?? "-") : "-"} />
+            <>
+              <InfoCell label="Department" value={person.departmentName ?? "-"} />
+              <InfoCell label="Role" value={person.roleName ?? "-"} />
+              <InfoCell label="Manager" value={person.supervisorId ? (person.supervisorId === user.id ? user.name : realEmployees.find((e) => e.id === person.supervisorId)?.name ?? "-") : "-"} />
+            </>
           )}
           checklistItems={CREATOR_CHECKLIST}
-          canEditPerson={canEditPeople}
+          canEditPerson={false}
           departments={departments}
           managerOptions={managerOptions}
-          canInitiate={(person, deboard) => canSubmitCreator && !deboard && person.status !== "disabled"}
-          canApprove={(_, deboard) => canApproveDeboard && deboard?.status === "pending_lead_approval"}
-          canComplete={(_, deboard) => canApproveDeboard && deboard?.status === "data_recovery_pending"}
-          onSavePerson={(person, updates) => {
-            updateRosterMemberDetails(user, person.id, updates);
-            refresh();
-          }}
-          onInitiate={(person, reason) => {
-            submitCreatorDeboarding(user, person.id, reason || undefined);
-            refresh();
-          }}
-          onApprove={(_, deboardId) => {
-            approveCreatorDeboarding(user, deboardId);
-            refresh();
-          }}
-          onComplete={(_, deboardId, checklist) => {
-            completeCreatorDeboarding(user, deboardId, checklist);
-            refresh();
-          }}
+          canInitiate={() => false}
+          canApprove={() => false}
+          canComplete={() => false}
+          onSavePerson={() => {}}
+          onInitiate={() => {}}
+          onApprove={() => {}}
+          onComplete={() => {}}
         />
       )}
 
@@ -623,10 +601,13 @@ function CreateEmployeeForm({
   const [managerUserId, setManagerUserId] = useState("");
   const [joinedAt, setJoinedAt] = useState(() => new Date().toISOString().slice(0, 10));
   const [temporaryPassword, setTemporaryPassword] = useState("");
+  const [probationRequired, setProbationRequired] = useState(true);
+  const [probationDuration, setProbationDuration] = useState(90);
+  const [probationDurationUnit, setProbationDurationUnit] = useState<"days" | "months">("days");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [successPassword, setSuccessPassword] = useState<{ email: string; password: string } | null>(null);
+  const [success, setSuccess] = useState<{ email: string; password: string; warning?: string } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -665,8 +646,12 @@ function CreateEmployeeForm({
         managerUserId: managerUserId || undefined,
         joinedAt,
         temporaryPassword,
+        probationRequired,
+        probationDurationDays: probationRequired
+          ? (probationDurationUnit === "months" ? probationDuration * 30 : probationDuration)
+          : undefined,
       });
-      setSuccessPassword({ email: created.email, password: temporaryPassword });
+      setSuccess({ email: created.email, password: temporaryPassword, warning: created.warning });
       onCreated(created);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create the employee.");
@@ -675,7 +660,7 @@ function CreateEmployeeForm({
     }
   }
 
-  if (successPassword) {
+  if (success) {
     return (
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={motionPreset.page.transition} style={{ ...S.card, padding: "clamp(16px, 2.5vw, 28px)", display: "flex", flexDirection: "column", gap: "14px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "9px" }}>
@@ -683,10 +668,15 @@ function CreateEmployeeForm({
           <span style={T.cardTitle}>Employee created</span>
         </div>
         <p style={{ fontFamily: "var(--font-body)", fontSize: "var(--text-13)", color: "var(--op-text-2)" }}>
-          Account created for <strong>{successPassword.email}</strong>. Share this temporary password with
+          Account created for <strong>{success.email}</strong>. Share this temporary password with
           them so they can sign in — it will not be shown again:
         </p>
-        <code style={{ ...S.cardInner, padding: "10px 14px", fontFamily: "var(--font-mono)", fontSize: "var(--text-14)", width: "fit-content" }}>{successPassword.password}</code>
+        <code style={{ ...S.cardInner, padding: "10px 14px", fontFamily: "var(--font-mono)", fontSize: "var(--text-14)", width: "fit-content" }}>{success.password}</code>
+        {success.warning && (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontFamily: "var(--font-body)", fontSize: "var(--text-12)", color: "var(--color-error)" }}>
+            <CircleAlert size={13} /> {success.warning}
+          </span>
+        )}
         <div>
           <button type="button" style={S.btnPrimary} onClick={onCancel}>Done</button>
         </div>
@@ -745,6 +735,43 @@ function CreateEmployeeForm({
             {(options?.managers ?? []).map((manager) => <option key={manager.id} value={manager.id}>{manager.name}</option>)}
           </select>
         </FormField>
+      </FormSection>
+
+      <FormSection icon={ShieldCheck} title="Probation">
+        <FormField label="Probation Required">
+          <div style={{ display: "flex", gap: "6px" }}>
+            <button type="button" style={S.pill(probationRequired) as React.CSSProperties} onClick={() => setProbationRequired(true)}>Yes</button>
+            <button type="button" style={S.pill(!probationRequired) as React.CSSProperties} onClick={() => setProbationRequired(false)}>No</button>
+          </div>
+        </FormField>
+        <AnimatePresence initial={false}>
+          {probationRequired && (
+            <motion.div
+              key="probation-duration"
+              initial={{ opacity: 0, scale: 0.97, height: 0 }}
+              animate={{ opacity: 1, scale: 1, height: "auto" }}
+              exit={{ opacity: 0, scale: 0.97, height: 0 }}
+              transition={motionPreset.fadeScale.transition}
+              style={{ overflow: "hidden" }}
+            >
+              <FormField label="Probation Duration">
+                <div style={{ display: "flex", gap: "6px" }}>
+                  <input
+                    type="number"
+                    min={1}
+                    value={probationDuration}
+                    onChange={(e) => setProbationDuration(Number(e.target.value) || 0)}
+                    style={{ ...S.input, width: "90px" }}
+                  />
+                  <select value={probationDurationUnit} onChange={(e) => setProbationDurationUnit(e.target.value as "days" | "months")} style={S.select}>
+                    <option value="days">Days</option>
+                    <option value="months">Months</option>
+                  </select>
+                </div>
+              </FormField>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </FormSection>
 
       <FormSection icon={ShieldCheck} title="Account">

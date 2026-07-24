@@ -1,34 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { AttendanceDayStatus, AttendanceRecord, User } from "@/core/operon";
+import type { AttendanceDayStatus, AttendanceRecord, Holiday, LeaveRequest, User } from "@/core/operon";
 import { useSession } from "@/auth/useSession";
-import {
-  approveLeaveAsFounder,
-  approveLeaveAsHr,
-  approveLeaveAsTl,
-  canApproveLeaveRequestAsFounder,
-  canApproveLeaveRequestAsHr,
-  canApproveLeaveRequestAsTl,
-  deleteHolidayEntry,
-  getAttendanceForMonth,
-  getDepartmentLabel,
-  getDepartments,
-  getHolidays,
-  getLeaveRequestsForHr,
-  getMyDirectReports,
-  getMyLeaveRequests,
-  getTeamLeaveHistoryForTl,
-  getRoleLabel,
-  getUserById,
-  getUsers,
-  rejectLeave,
-  saveHolidayEntry,
-  submitLeaveRequest,
-  setAttendanceDay,
-  type LeaveRequest,
-  type LeaveRequestType,
-} from "@/core/operon";
 import { LEAVE_TYPE_LABELS } from "@/core/types";
 import {
   canApproveLeaveAsHr,
@@ -36,7 +10,6 @@ import {
   canManageHrCalendar,
   canViewAllHrRecords,
 } from "@/security/permissions";
-import { ROLE_IDS } from "@/core/roles";
 import { openFloatingLayer, subscribeFloatingLayerClose } from "@/lib/floatingLayers";
 import { S, Sp, T } from "@/styles/sharedUi";
 import {
@@ -51,6 +24,94 @@ import {
   CalendarClock, ChevronLeft, ChevronRight, UsersRound, CheckCircle2, Home as HomeIcon,
   CalendarOff, TrendingUp,
 } from "lucide-react";
+import {
+  getWorkforceAttendanceMonth,
+  setWorkforceAttendanceDay,
+  createWorkforceHoliday,
+  deleteWorkforceHoliday,
+  type WorkforceAttendanceUser,
+} from "@/services/workforceAttendance";
+import {
+  listWorkforceLeaveRequests,
+  submitWorkforceLeaveRequest,
+  managerDecideLeaveRequest,
+  hrDecideLeaveRequest,
+  type WorkforceLeaveRequest,
+} from "@/services/workforceLeave";
+
+// ─── Adapters: real workforce.* rows → the legacy shapes AttendanceMatrix/
+// MonthlyCalendar/HolidayPanel/etc. already render. These components are
+// shared with src/features/workforce/EmployeeProfilePanel.tsx, which still
+// reads the legacy mock engine — adapting here (rather than changing the
+// shared types) keeps that panel working unchanged until it's migrated too.
+
+function toLegacyUser(u: WorkforceAttendanceUser): User {
+  return {
+    id: u.id,
+    name: u.name,
+    email: u.email,
+    avatar: "",
+    userType: "employee",
+    roleId: "employee",
+    roleName: u.roleName,
+    departmentId: u.departmentId,
+    departmentName: u.departmentName,
+    supervisorId: u.supervisorId,
+    permissionIds: [],
+    createdById: "",
+    status: "active",
+  };
+}
+
+function toLegacyAttendanceRecord(userId: string, month: string, days: Record<string, string>): AttendanceRecord {
+  return {
+    id: `${userId}-${month}`,
+    userId,
+    month,
+    days: days as Record<string, AttendanceDayStatus>,
+    createdAt: "",
+    updatedAt: "",
+  };
+}
+
+function toLegacyHoliday(h: { id: string; date: string; name: string }): Holiday {
+  return { id: h.id, date: h.date, name: h.name, type: "public", createdById: "", createdAt: "", updatedAt: "" };
+}
+
+/**
+ * Real statuses (pending_manager/manager_approved/pending_hr/approved/
+ * rejected/cancelled) collapsed onto the legacy 5-value vocabulary these
+ * shared components already branch on. pending_hr covers both the HR
+ * Manager and Co-Founder steps in the real schema (no separate "founder"
+ * status), so it maps to the same "awaiting HR" legacy value as
+ * manager_approved's transient in-between state.
+ */
+function toLegacyLeaveStatus(status: string): LeaveRequest["status"] {
+  switch (status) {
+    case "pending_manager": return "pending";
+    case "manager_approved":
+    case "pending_hr": return "tl_approved";
+    case "approved": return "hr_approved";
+    case "rejected": return "rejected";
+    case "cancelled": return "cancelled";
+    default: return "pending";
+  }
+}
+
+function toLegacyLeaveRequest(r: WorkforceLeaveRequest): LeaveRequest {
+  return {
+    id: r.id,
+    userId: r.userId,
+    requestType: r.requestType,
+    dateFrom: r.dateFrom,
+    dateTo: r.dateTo,
+    reason: r.reason,
+    status: toLegacyLeaveStatus(r.status),
+    founderNotified: false,
+    createdAt: r.createdAt,
+    updatedAt: r.createdAt,
+  };
+}
 
 // ─── Types & Constants ────────────────────────────────────────────────────────
 
@@ -174,12 +235,9 @@ export default function AttendancePage() {
   const [showAddHoliday, setShowAddHoliday]   = useState(false);
   const [holidayDate, setHolidayDate]         = useState("");
   const [holidayName, setHolidayName]         = useState("");
-  const [holidayType, setHolidayType]         = useState<HolidayType>("public");
 
   // Feedback
   const [message, setMessage]                 = useState("");
-  const [rejectingId, setRejectingId]         = useState<string | null>(null);
-  const [rejectReason, setRejectReason]       = useState("");
 
   // HR drilldown into individual employee calendar
   const [drilldownUser, setDrilldownUser]     = useState<User | null>(null);
@@ -190,8 +248,16 @@ export default function AttendancePage() {
   const [managerFilter, setManagerFilter]     = useState("all");
   const [orgStatusFilter, setOrgStatusFilter] = useState<AttendanceDayStatus | "all">("all");
 
-  const [, forceRefresh] = useState(0);
-  function refresh() { forceRefresh((n) => n + 1); }
+  // Real data — fetched from workforce.hr_attendance/hr_holidays/hr_leave_requests
+  const [monthUsers, setMonthUsers]     = useState<WorkforceAttendanceUser[]>([]);
+  const [monthRecords, setMonthRecords] = useState<Record<string, Record<string, string>>>({});
+  const [holidays, setHolidays]         = useState<Holiday[]>([]);
+  const [todayMonthRecords, setTodayMonthRecords] = useState<Record<string, Record<string, string>>>({});
+  const [allLeaveRequests, setAllLeaveRequests]   = useState<WorkforceLeaveRequest[]>([]);
+  const [loadError, setLoadError]       = useState("");
+  const [version, setVersion]           = useState(0);
+
+  function refresh() { setVersion((v) => v + 1); }
 
   function handleSelectDay(day: number | null) {
     if (day !== null) {
@@ -234,28 +300,65 @@ export default function AttendancePage() {
 
   // Role detection
   const isHrTier     = user ? canViewAllHrRecords(user) : false;
-  const directReports = user ? getMyDirectReports(user) : [];
+  const directReports = monthUsers.filter((u) => u.supervisorId === user?.id).map(toLegacyUser);
   const isTlTier     = user ? (canApproveLeaveAsTl(user) && !isHrTier && directReports.length > 0) : false;
 
   // Set default view once after user loads
   useEffect(() => {
-    if (!user || viewInitRef.current) return;
+    if (!user || viewInitRef.current || monthUsers.length === 0) return;
     viewInitRef.current = true;
     if (canViewAllHrRecords(user)) setViewMode("org");
-    else if (canApproveLeaveAsTl(user) && getMyDirectReports(user).length > 0) setViewMode("team");
-  }, [user]);
+    else if (canApproveLeaveAsTl(user) && directReports.length > 0) setViewMode("team");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, monthUsers]);
 
-  // Data
-  const records        = user ? getAttendanceForMonth(user, month) : [];
-  const recordByUser   = new Map(records.map((r) => [r.userId, r] as [string, AttendanceRecord]));
-  const allOrgUsers    = isHrTier ? getUsers().filter((u) => u.userType !== "creator") : [];
-  const holidays       = getHolidays();
+  // Fetch this month's attendance/holidays/roster.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    getWorkforceAttendanceMonth(month)
+      .then((data) => {
+        if (cancelled) return;
+        setMonthUsers(data.users);
+        setMonthRecords(Object.fromEntries(data.records.map((r) => [r.userId, r.days])));
+        setHolidays(data.holidays.map(toLegacyHoliday));
+        setLoadError("");
+      })
+      .catch((err) => { if (!cancelled) setLoadError(err instanceof Error ? err.message : "Failed to load attendance."); });
+    return () => { cancelled = true; };
+  }, [user, month, version]);
+
+  // Org KPI row always reflects the real current day, independent of which
+  // month the matrix is currently displaying.
+  const todayMonthKey = currentMonth();
+  useEffect(() => {
+    if (!user || !isHrTier || todayMonthKey === month) return;
+    let cancelled = false;
+    getWorkforceAttendanceMonth(todayMonthKey)
+      .then((data) => { if (!cancelled) setTodayMonthRecords(Object.fromEntries(data.records.map((r) => [r.userId, r.days]))); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, isHrTier, todayMonthKey, month, version]);
+
+  // Fetch leave/WFH requests visible to the caller (own + reports, or everyone for HR tier).
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    listWorkforceLeaveRequests()
+      .then((rows) => { if (!cancelled) setAllLeaveRequests(rows); })
+      .catch((err) => { if (!cancelled) setLoadError(err instanceof Error ? err.message : "Failed to load leave requests."); });
+    return () => { cancelled = true; };
+  }, [user, version]);
+
+  const recordByUser = new Map(
+    monthUsers.map((u) => [u.id, toLegacyAttendanceRecord(u.id, month, monthRecords[u.id] ?? {})] as [string, AttendanceRecord]),
+  );
+  const allOrgUsers    = isHrTier ? monthUsers.map(toLegacyUser) : [];
   const holidaysByDate = new Map(holidays.map((h) => [h.date, h]));
 
-  const leaveRequests = user ? getMyLeaveRequests(user) : [];
-  const teamLeaveRequests = user
-    ? (isHrTier ? getLeaveRequestsForHr(user) : isTlTier ? [...leaveRequests, ...getTeamLeaveHistoryForTl(user)] : leaveRequests)
-    : [];
+  const leaveRequests = allLeaveRequests.filter((r) => r.userId === user?.id).map(toLegacyLeaveRequest);
+  const teamLeaveRequests = allLeaveRequests.map(toLegacyLeaveRequest);
 
   // Build leave-request overlay maps
   const requestByDate = new Map<string, LeaveRequest>();
@@ -274,22 +377,21 @@ export default function AttendancePage() {
       if (iso.startsWith(month)) requestByUserDate.set(`${r.userId}:${iso}`, r);
     }
   }
-  // Org KPI row always reflects the real current day, independent of which
-  // month the matrix is currently displaying.
-  const todayMonthKey = currentMonth();
   const todayRecordByUser = isHrTier
-    ? (month === todayMonthKey ? recordByUser : new Map(getAttendanceForMonth(user!, todayMonthKey).map((r) => [r.userId, r] as [string, AttendanceRecord])))
+    ? (month === todayMonthKey
+        ? recordByUser
+        : new Map(monthUsers.map((u) => [u.id, toLegacyAttendanceRecord(u.id, todayMonthKey, todayMonthRecords[u.id] ?? {})] as [string, AttendanceRecord])))
     : recordByUser;
 
   const canEditCalendar = user ? canManageHrCalendar(user) : false;
   const canApproveAsTl  = user ? canApproveLeaveAsTl(user) : false;
   const canApproveAsHr  = user ? canApproveLeaveAsHr(user) : false;
+  const iAmCofounder    = (user?.roleName ?? "").trim().toLowerCase() === "co-founder";
 
-  const approvalQueue = user && (canApproveAsHr || canApproveAsTl || user.roleId === ROLE_IDS.ADMIN)
-    ? teamLeaveRequests.filter((r) =>
-        canApproveLeaveRequestAsTl(user, r) ||
-        canApproveLeaveRequestAsHr(user, r) ||
-        canApproveLeaveRequestAsFounder(user, r),
+  const approvalQueue = user && (canApproveAsHr || canApproveAsTl)
+    ? allLeaveRequests.filter((r) =>
+        (r.status === "pending_manager" && r.currentApproverUserId === user.id) ||
+        (r.status === "pending_hr" && (r.currentApproverUserId === user.id || iAmCofounder)),
       )
     : [];
 
@@ -308,11 +410,17 @@ export default function AttendancePage() {
     return diffDays >= 0 && diffDays <= RECENT_PAST_DAYS;
   }
 
-  function handleSelectStatus(targetUser: User, day: number, status: AttendanceDayStatus | null) {
+  async function handleSelectStatus(targetUser: User, day: number, status: AttendanceDayStatus | null) {
     const iso = isoForDay(month, day);
     if (!canEditDate(targetUser, iso)) { setMessage("That day is outside your editable attendance window."); return; }
+    if (!isHrTier && status !== "present") {
+      setMessage("You may only mark yourself present — use a Leave/WFH request for anything else.");
+      return;
+    }
     try {
-      setAttendanceDay(user!, targetUser.id, iso, status);
+      const realStatus = status === "half_day" || status === "absent" ? null : status;
+      if (!realStatus && status) { setMessage("That status isn't tracked in the real attendance system."); return; }
+      await setWorkforceAttendanceDay(targetUser.id, iso, (realStatus ?? "unmarked") as "present" | "wfh" | "leave" | "unmarked");
       setMessage(status ? `${STATUS_META[status].label} saved for ${iso}.` : `Cleared ${iso}.`);
       setSelectedDay(null);
       refresh();
@@ -325,52 +433,39 @@ export default function AttendancePage() {
     setRequestDay(day); setRequestKind(kind); setRequestTo(iso); setRequestReason("");
   }
 
-  function handleSubmitRequest() {
+  async function handleSubmitRequest() {
     if (!requestDay) return;
     const from = isoForDay(month, requestDay);
     if (!requestTo || !requestReason.trim()) { setMessage("Date range and reason are required."); return; }
     try {
-      submitLeaveRequest(user!, { requestType: requestKind as LeaveRequestType, dateFrom: from, dateTo: requestTo, reason: requestReason.trim() });
+      await submitWorkforceLeaveRequest(requestKind, from, requestTo, requestReason.trim());
       setMessage(`${requestKind === "wfh" ? "WFH" : "Leave"} request submitted.`);
       setRequestDay(null); setSelectedDay(null); setRequestReason(""); refresh();
     } catch (err) { setMessage(err instanceof Error ? err.message : "Failed to submit request."); }
   }
 
-  function handleAddHoliday() {
+  async function handleAddHoliday() {
     if (!holidayDate || !holidayName.trim()) { setMessage("Date and name are required."); return; }
     try {
-      saveHolidayEntry(user!, { date: holidayDate, name: holidayName.trim(), type: holidayType });
-      setHolidayDate(""); setHolidayName(""); setHolidayType("public");
+      await createWorkforceHoliday(holidayDate, holidayName.trim());
+      setHolidayDate(""); setHolidayName("");
       setShowAddHoliday(false); setMessage("Holiday added."); refresh();
     } catch (err) { setMessage(err instanceof Error ? err.message : "Failed to add holiday."); }
   }
 
-  function handleDeleteHoliday(id: string) {
-    try { deleteHolidayEntry(user!, id); setMessage("Holiday removed."); refresh(); }
+  async function handleDeleteHoliday(id: string) {
+    try { await deleteWorkforceHoliday(id); setMessage("Holiday removed."); refresh(); }
     catch (err) { setMessage(err instanceof Error ? err.message : "Failed to remove holiday."); }
   }
 
-  function handleApproveTl(id: string) {
-    try { approveLeaveAsTl(user!, id); setMessage("Approved (TL step)."); refresh(); }
+  async function handleApproveManagerStep(id: string) {
+    try { await managerDecideLeaveRequest(id, "approved"); setMessage("Approved (manager step)."); refresh(); }
     catch (err) { setMessage(err instanceof Error ? err.message : "Failed to approve."); }
   }
 
-  function handleApproveHr(id: string) {
-    try { approveLeaveAsHr(user!, id); setMessage("Approved — attendance updated."); refresh(); }
+  async function handleApproveHrStep(id: string) {
+    try { await hrDecideLeaveRequest(id, "approved"); setMessage("Approved — attendance updated."); refresh(); }
     catch (err) { setMessage(err instanceof Error ? err.message : "Failed to approve."); }
-  }
-
-  function handleApproveFounder(id: string) {
-    try { approveLeaveAsFounder(user!, id); setMessage("Approved - attendance updated."); refresh(); }
-    catch (err) { setMessage(err instanceof Error ? err.message : "Failed to approve."); }
-  }
-
-  function handleReject(id: string) {
-    if (!rejectReason.trim()) { setMessage("Enter a rejection reason."); return; }
-    try {
-      rejectLeave(user!, id, rejectReason.trim());
-      setMessage("Request rejected."); setRejectingId(null); setRejectReason(""); refresh();
-    } catch (err) { setMessage(err instanceof Error ? err.message : "Failed to reject."); }
   }
 
   // ── View tabs ────────────────────────────────────────────────────────────────
@@ -418,10 +513,10 @@ export default function AttendancePage() {
           } />
 
           {/* Feedback */}
-          {message && (
+          {(message || loadError) && (
             <Surface tone="inset" padding="compact" style={{ display: "flex", alignItems: "center", gap: Sp["2"] }}>
-              <span style={{ width: "5px", height: "5px", borderRadius: "50%", background: "var(--op-accent)", flexShrink: 0 }} />
-              <p style={T.bodySmall}>{message}</p>
+              <span style={{ width: "5px", height: "5px", borderRadius: "50%", background: loadError ? "#e5484d" : "var(--op-accent)", flexShrink: 0 }} />
+              <p style={T.bodySmall}>{loadError || message}</p>
             </Surface>
           )}
 
@@ -511,50 +606,29 @@ export default function AttendancePage() {
           </summary>
           <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "12px" }}>
             {approvalQueue.map((req) => {
-              const requester  = getUserById(req.userId);
-              const isRejecting = rejectingId === req.id;
               const typeLabel  = LEAVE_TYPE_LABELS[req.requestType] ?? "Leave";
-              const canActAsTl = canApproveLeaveRequestAsTl(user, req);
-              const canActAsHr = canApproveLeaveRequestAsHr(user, req);
-              const canActAsFounder = canApproveLeaveRequestAsFounder(user, req);
-              const statusLabel =
-                req.status === "cofounder_pending" ? "Pending Co-Founder approval" :
-                req.status === "tl_approved" ? "Pending HR approval" :
-                canActAsFounder ? "Pending Co-Founder approval" :
-                canActAsHr ? "Pending HR approval" :
-                "Pending manager approval";
+              const isManagerStep = req.status === "pending_manager";
+              const statusLabel = isManagerStep ? "Pending manager approval" : "Pending HR approval";
               return (
                 <div key={req.id} style={{ ...S.row, padding: `${Sp["3"]} ${Sp["4"]}`, display: "flex", flexDirection: "column", alignItems: "stretch", gap: Sp["2"] }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-                      <span style={{ fontFamily: "var(--font-ui)", fontSize: "var(--text-13)", fontWeight: 700, color: "var(--op-text)" }}>{requester?.name ?? req.userId}</span>
+                      <span style={{ fontFamily: "var(--font-ui)", fontSize: "var(--text-13)", fontWeight: 700, color: "var(--op-text)" }}>{req.userName}</span>
                       <span style={S.badge}>{typeLabel}</span>
                       <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-12)", color: "var(--op-text-3)" }}>{req.dateFrom}{req.dateTo !== req.dateFrom ? ` → ${req.dateTo}` : ""}</span>
                       <span style={{ fontFamily: "var(--font-body)", fontSize: "var(--text-12)", color: "var(--op-text-3)" }}>{req.reason}</span>
                       <span style={{ fontFamily: "var(--font-ui)", fontSize: "var(--text-11)", color: "var(--op-text-3)", letterSpacing: "0.04em" }}>{statusLabel}</span>
                     </div>
-                    {!isRejecting && (
-                      <div style={{ display: "flex", gap: "6px" }}>
-                        {canActAsTl && (
-                          <button type="button" style={{ ...S.btnPrimary, height: "30px", padding: "0 12px" }} onClick={() => handleApproveTl(req.id)}>Approve</button>
-                        )}
-                        {canActAsHr && (
-                          <button type="button" style={{ ...S.btnPrimary, height: "30px", padding: "0 12px" }} onClick={() => handleApproveHr(req.id)}>Approve</button>
-                        )}
-                        {canActAsFounder && (
-                          <button type="button" style={{ ...S.btnPrimary, height: "30px", padding: "0 12px" }} onClick={() => handleApproveFounder(req.id)}>Approve</button>
-                        )}
-                        <button type="button" style={{ ...S.btnGhost, height: "30px", padding: "0 12px", color: "#e5484d", borderColor: "#e5484d" }} onClick={() => { setRejectingId(req.id); setRejectReason(""); }}>Reject</button>
-                      </div>
-                    )}
-                  </div>
-                  {isRejecting && (
-                    <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
-                      <input style={{ ...S.input, flex: 1, minWidth: "200px" }} value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} placeholder="Rejection reason (required)" autoFocus />
-                      <button type="button" style={{ ...S.btnGhost, height: "30px", padding: "0 12px", color: "#e5484d", borderColor: "#e5484d" }} onClick={() => handleReject(req.id)}>Confirm</button>
-                      <button type="button" style={{ ...S.btnGhost, height: "30px", padding: "0 12px" }} onClick={() => setRejectingId(null)}>Cancel</button>
+                    <div style={{ display: "flex", gap: "6px" }}>
+                      <button
+                        type="button"
+                        style={{ ...S.btnPrimary, height: "30px", padding: "0 12px" }}
+                        onClick={() => (isManagerStep ? handleApproveManagerStep(req.id) : handleApproveHrStep(req.id))}
+                      >
+                        Approve
+                      </button>
                     </div>
-                  )}
+                  </div>
                 </div>
               );
             })}
@@ -567,10 +641,8 @@ export default function AttendancePage() {
           <AddHolidayModal
             holidayDate={holidayDate}
             holidayName={holidayName}
-            holidayType={holidayType}
             onDateChange={setHolidayDate}
             onNameChange={setHolidayName}
-            onTypeChange={setHolidayType}
             onSubmit={handleAddHoliday}
             onClose={() => setShowAddHoliday(false)}
           />
@@ -635,7 +707,7 @@ function AttendanceMatrix({
   month: string;
   users: User[];
   recordByUser: Map<string, AttendanceRecord>;
-  holidaysByDate: Map<string, ReturnType<typeof getHolidays>[number]>;
+  holidaysByDate: Map<string, Holiday>;
   requestByUserDate: Map<string, LeaveRequest>;
   showFilters?: boolean;
   searchQuery?: string;
@@ -658,7 +730,9 @@ function AttendanceMatrix({
   const isCurrentMonth = month === currentMonth();
 
   // Filters
-  const departments  = showFilters ? getDepartments() : [];
+  const departments = showFilters
+    ? Array.from(new Map(users.filter((u) => u.departmentId).map((u) => [u.departmentId as string, { id: u.departmentId as string, name: u.departmentName ?? u.departmentId as string }])).values())
+    : [];
   const supervisorIds = new Set(users.map((u) => u.supervisorId).filter(Boolean) as string[]);
   const managers     = showFilters ? users.filter((u) => supervisorIds.has(u.id)) : [];
 
@@ -836,7 +910,7 @@ function AttendanceMatrix({
                         {emp.name}
                       </div>
                       <div style={{ fontFamily: "var(--font-body)", fontSize: "10px", color: "var(--op-text-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: "1px" }}>
-                        {getRoleLabel(emp.roleId)}{emp.departmentId ? ` · ${getDepartmentLabel(emp.departmentId)}` : ""}
+                        {emp.roleName ?? "—"}{emp.departmentName ? ` · ${emp.departmentName}` : ""}
                       </div>
                     </div>
                   </button>
@@ -935,7 +1009,7 @@ function HolidayPanel({
   onDeleteHoliday,
   onOpenAddModal,
 }: {
-  holidays: ReturnType<typeof getHolidays>;
+  holidays: Holiday[];
   canEdit: boolean;
   onDeleteHoliday: (id: string) => void;
   onOpenAddModal: () => void;
@@ -1002,16 +1076,14 @@ function HolidayPanel({
 // ─── Add Holiday Modal ────────────────────────────────────────────────────────
 
 function AddHolidayModal({
-  holidayDate, holidayName, holidayType,
-  onDateChange, onNameChange, onTypeChange,
+  holidayDate, holidayName,
+  onDateChange, onNameChange,
   onSubmit, onClose,
 }: {
   holidayDate: string;
   holidayName: string;
-  holidayType: HolidayType;
   onDateChange: (v: string) => void;
   onNameChange: (v: string) => void;
-  onTypeChange: (v: HolidayType) => void;
   onSubmit: () => void;
   onClose: () => void;
 }) {
@@ -1023,11 +1095,6 @@ function AddHolidayModal({
         <div style={{ display: "flex", flexDirection: "column", gap: Sp["4"] }}>
           <Input label="Date" type="date" value={holidayDate} onChange={(e) => onDateChange(e.target.value)} />
           <Input label="Name" value={holidayName} onChange={(e) => onNameChange(e.target.value)} placeholder="e.g. Independence Day" autoFocus />
-          <Select label="Type" value={holidayType} onChange={(e) => onTypeChange(e.target.value as HolidayType)}>
-              <option value="public">Public</option>
-              <option value="optional">Optional</option>
-              <option value="company">Company</option>
-          </Select>
         </div>
     </Modal>
   );
@@ -1046,7 +1113,7 @@ export function MonthlyCalendar({
   targetUser: User;
   record: AttendanceRecord | undefined;
   requestByDate: Map<string, LeaveRequest>;
-  holidaysByDate: Map<string, ReturnType<typeof getHolidays>[number]>;
+  holidaysByDate: Map<string, Holiday>;
   selectedDay: number | null;
   onSelectDay: (day: number | null) => void;
   onSelectStatus: (targetUser: User, day: number, status: AttendanceDayStatus | null) => void;
@@ -1169,7 +1236,7 @@ export function MonthlyCalendar({
 
 function HolidayInfoPopover({ isSunday, holiday, onClose }: {
   isSunday: boolean;
-  holiday: ReturnType<typeof getHolidays>[number] | undefined;
+  holiday: Holiday | undefined;
   onClose: () => void;
 }) {
   const title = holiday?.name ?? (isSunday ? "Weekly Off" : "Holiday");
@@ -1203,7 +1270,7 @@ function StatusPopover({
   onRequest: (day: number, kind: RequestKind) => void;
   requestOpen: boolean; requestKind: RequestKind;
   requestFrom: string; requestTo: string; requestReason: string;
-  holidaysByDate: Map<string, ReturnType<typeof getHolidays>[number]>;
+  holidaysByDate: Map<string, Holiday>;
   onRequestToChange: (v: string) => void;
   onRequestReasonChange: (v: string) => void;
   onSubmitRequest: () => void;
