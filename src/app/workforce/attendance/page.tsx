@@ -254,7 +254,7 @@ export default function AttendancePage() {
 
   const leaveRequests = user ? getMyLeaveRequests(user) : [];
   const teamLeaveRequests = user
-    ? (isHrTier ? getLeaveRequestsForHr(user) : [...leaveRequests, ...getTeamLeaveHistoryForTl(user)])
+    ? (isHrTier ? getLeaveRequestsForHr(user) : isTlTier ? [...leaveRequests, ...getTeamLeaveHistoryForTl(user)] : leaveRequests)
     : [];
 
   // Build leave-request overlay maps

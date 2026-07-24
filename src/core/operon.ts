@@ -926,7 +926,14 @@ export function canApproveLeaveRequestAsTl(actor: User, request: LeaveRequest): 
 export function canApproveLeaveRequestAsHr(actor: User, request: LeaveRequest): boolean {
   const subject = getUserById(request.userId);
   if (!subject || !canApproveLeaveAsHr(actor)) return false;
-  return request.status === "tl_approved" && !requiresFounderFinalApproval(subject);
+  if (request.status === "tl_approved") return !requiresFounderFinalApproval(subject);
+  // No team lead/manager could be resolved for this person (no supervisor
+  // on file and no department fallback) — there is no one to perform the
+  // TL step, so HR is the only approver and acts directly on "pending".
+  if (request.status === "pending" && !getFirstLeaveApprover(subject)) {
+    return !requiresFounderFinalApproval(subject);
+  }
+  return false;
 }
 
 export function canApproveLeaveRequestAsFounder(actor: User, request: LeaveRequest): boolean {
@@ -1182,7 +1189,6 @@ export function approveLeaveAsHr(actor: User, requestId: string): LeaveRequest {
   if (!canApproveLeaveRequestAsHr(actor, request)) {
     throw new Error("You do not have permission to approve this request at its current stage.");
   }
-  if (request.status !== "tl_approved") throw new Error("This request is not awaiting HR approval.");
 
   const now = formatDocumentDate();
   request.status         = "hr_approved";
